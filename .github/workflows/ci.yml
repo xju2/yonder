@@ -56,6 +56,10 @@ jobs:
         run: |
           npm ci
           npx tauri build
+      - name: Check the app is signed
+        run: |
+          codesign --verify --deep --strict --verbose=2 target/release/bundle/macos/Yonder.app
+          codesign -dv target/release/bundle/macos/Yonder.app 2>&1 | grep -E "Signature=adhoc|Authority="
       - uses: actions/upload-artifact@v4
         with:
           name: Yonder-macos-arm64

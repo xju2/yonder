@@ -77,9 +77,13 @@ The agents cross-compile from macOS with nothing beyond `rustup`: Rust ships
 the musl C library and its own linker (see `.cargo/config.toml`).
 
 Every pull request also builds a macOS disk image; download it from the
-**Yonder-macos-arm64** artifact on the workflow run. The app is not signed
-yet, so the first time, right-click Yonder.app and choose Open, or run
-`xattr -dr com.apple.quarantine /Applications/Yonder.app`.
+**Yonder-macos-arm64** artifact on the workflow run. The app is signed ad hoc
+but not notarized by Apple, so macOS blocks it on first launch. After copying
+it to Applications, run once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Yonder.app
+```
 
 ### Debugging a connection without the app
 
