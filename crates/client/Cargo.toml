@@ -1,0 +1,11 @@
+[package]
+name = "yonder-client"
+description = "Starts yonder-agent over ssh and routes requests to it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+yonder-proto.workspace = true
+tokio.workspace = true
+sha2 = "0.10"

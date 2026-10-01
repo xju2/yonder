@@ -1,0 +1,3 @@
+# Agent builds bundled into the app. Filled by scripts/build-agents.sh.
+*
+!.gitignore

@@ -1,0 +1,224 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import * as api from "./api";
+import { Editors } from "./editor";
+import { ask } from "./modal";
+import { FileTree } from "./tree";
+
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+
+const connectView = $("connect-view");
+const workspace = $("workspace");
+const form = $<HTMLFormElement>("connect-form");
+const hostInput = $<HTMLInputElement>("host");
+const folderInput = $<HTMLInputElement>("folder");
+const connectBtn = $<HTMLButtonElement>("connect-btn");
+const connectLog = $("connect-log");
+const connectError = $("connect-error");
+const banner = $("banner");
+const statusConn = $("status-conn");
+const statusMsg = $("status-msg");
+
+let conn: api.ConnInfo | null = null;
+let target = { host: "", folder: "" };
+
+// ---- recent connections (a per-machine convenience; failures are harmless)
+
+interface Recent {
+  host: string;
+  folder: string;
+}
+const RECENT_KEY = "yonder.recent";
+
+function loadRecent(): Recent[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(r: Recent) {
+  const list = [r, ...loadRecent().filter((x) => x.host !== r.host || x.folder !== r.folder)];
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function paintRecent() {
+  const box = $("recent");
+  const list = loadRecent();
+  box.replaceChildren(
+    ...list.map((r) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "recent";
+      b.textContent = `${r.host}:${r.folder || "~"}`;
+      b.addEventListener("click", () => {
+        hostInput.value = r.host;
+        folderInput.value = r.folder;
+        form.requestSubmit();
+      });
+      return b;
+    }),
+  );
+  if (list.length === 0) hostInput.focus();
+}
+
+// ---- connection log and status
+
+let statusTimer = 0;
+const status = (msg: string) => {
+  statusMsg.textContent = msg;
+  clearTimeout(statusTimer);
+  if (msg) statusTimer = window.setTimeout(() => (statusMsg.textContent = ""), 6000);
+};
+
+void api.onLog((e) => {
+  const li = document.createElement("li");
+  li.className = e.level;
+  li.textContent = e.message;
+  connectLog.append(li);
+  li.scrollIntoView({ block: "nearest" });
+  if (!connectView.hidden) return;
+  if (e.level === "step") status(e.message);
+});
+
+void api.onClosed((e) => {
+  if (!conn || e.generation !== conn.generation) return;
+  statusConn.classList.add("down");
+  showBanner(`Disconnected from ${conn.host}: ${e.reason}. Your open files and edits are kept.`);
+});
+
+function showBanner(text: string) {
+  banner.replaceChildren();
+  const span = document.createElement("span");
+  span.textContent = text;
+  const btn = document.createElement("button");
+  btn.textContent = "Reconnect";
+  btn.addEventListener("click", () => void reconnect(btn));
+  banner.append(span, btn);
+  banner.hidden = false;
+}
+
+// ---- views
+
+const tree = new FileTree($("tree"), (path) => void editors.open(path));
+const editors = new Editors(
+  $("editor"),
+  $("tabs"),
+  $("placeholder"),
+  (msg) => status(msg),
+  (path) => tree.setActive(path),
+  (pos) => ($("status-pos").textContent = pos),
+);
+
+async function startSession(info: api.ConnInfo) {
+  conn = info;
+  connectView.hidden = true;
+  workspace.hidden = false;
+  banner.hidden = true;
+  statusConn.classList.remove("down");
+  statusConn.textContent = `${info.host}:${info.root}`;
+  statusConn.title = `Connected to ${info.hostname}`;
+  const home = info.home.replace(/\/$/, "");
+  const shown =
+    info.root === home ? "~" : info.root.startsWith(home + "/") ? "~" + info.root.slice(home.length) : info.root;
+  $("root-name").textContent = shown;
+  $("root-name").title = info.root;
+  const title = `${info.root.split("/").pop() || "/"} — ${info.host} — Yonder`;
+  document.title = title;
+  void getCurrentWindow().setTitle(title);
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  target = { host: hostInput.value.trim(), folder: folderInput.value.trim() };
+  connectLog.replaceChildren();
+  connectError.hidden = true;
+  connectBtn.disabled = true;
+  connectBtn.textContent = "Connecting…";
+  try {
+    const info = await api.connect(target.host, target.folder || "~");
+    saveRecent(target);
+    await startSession(info);
+    await tree.setRoot(info.root);
+  } catch (err) {
+    const ce = api.asError(err);
+    connectError.replaceChildren();
+    const msg = document.createElement("p");
+    msg.textContent = ce.message;
+    connectError.append(msg);
+    if (ce.hint) {
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = ce.hint;
+      connectError.append(hint);
+    }
+    connectError.hidden = false;
+  } finally {
+    connectBtn.disabled = false;
+    connectBtn.textContent = "Connect";
+  }
+});
+
+async function reconnect(btn: HTMLButtonElement) {
+  btn.disabled = true;
+  btn.textContent = "Reconnecting…";
+  try {
+    const info = await api.connect(target.host, target.folder || "~");
+    await startSession(info);
+    await tree.refresh();
+    status(`Reconnected to ${info.host}`);
+  } catch (err) {
+    const ce = api.asError(err);
+    btn.disabled = false;
+    btn.textContent = "Reconnect";
+    await ask(
+      "Could not reconnect.",
+      [{ value: "ok", label: "OK", primary: true }],
+      [ce.message, ce.hint].filter(Boolean).join("\n\n"),
+    );
+  }
+}
+
+$("refresh-tree").addEventListener("click", () => void tree.refresh());
+
+// Refreshing on focus catches files written by batch jobs or other machines,
+// which file-change notifications miss on network filesystems.
+window.addEventListener("focus", () => {
+  if (conn && !workspace.hidden) void tree.refresh();
+});
+
+// ---- sidebar width
+
+const sash = $("sash");
+sash.addEventListener("pointerdown", (e) => {
+  sash.setPointerCapture(e.pointerId);
+  const move = (ev: PointerEvent) => {
+    const w = Math.min(Math.max(ev.clientX, 140), window.innerWidth - 300);
+    document.documentElement.style.setProperty("--sidebar", `${w}px`);
+  };
+  sash.addEventListener("pointermove", move);
+  sash.addEventListener("pointerup", () => sash.removeEventListener("pointermove", move), {
+    once: true,
+  });
+});
+
+// ---- closing the window with unsaved edits
+
+void getCurrentWindow().onCloseRequested(async (event) => {
+  if (!editors.hasUnsaved()) return;
+  event.preventDefault();
+  const choice = await ask("Some files have unsaved changes.", [
+    { value: "cancel", label: "Keep editing", primary: true },
+    { value: "quit", label: "Close without saving", danger: true },
+  ]);
+  if (choice === "quit") {
+    await api.disconnect();
+    await getCurrentWindow().destroy();
+  }
+});
+
+paintRecent();
