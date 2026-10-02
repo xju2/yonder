@@ -93,7 +93,7 @@ export class TerminalPanel {
     this.panel.hidden = false;
     this.sash.hidden = false;
     const term = new Terminal({
-      fontFamily: '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
+      fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
       fontSize: 13,
       cursorBlink: true,
       scrollback: 10_000,

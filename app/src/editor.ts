@@ -8,6 +8,11 @@ import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { marked } from "marked";
+// The code font, bundled: Zed's default is a variant of IBM Plex Mono.
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/400-italic.css";
+import "@fontsource/ibm-plex-mono/700.css";
+import "@fontsource/ibm-plex-mono/700-italic.css";
 import { asError, gitDiff, readBytes, readFile, stat, writeFile } from "./api";
 import type { DiffRequest } from "./git";
 import { ask, tell } from "./modal";
@@ -129,13 +134,15 @@ export class Editors {
     this.editor = monaco.editor.create(host, {
       model: null,
       automaticLayout: true,
-      fontFamily: '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
+      fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
       fontSize: 13,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderWhitespace: "selection",
     });
     applyTheme();
+    // Monaco measures characters once; measure again once the font is in.
+    void document.fonts.load('13px "IBM Plex Mono"').then(() => monaco.editor.remeasureFonts());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save());
     this.editor.onDidChangeCursorPosition((e) =>
       this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`),
@@ -347,7 +354,7 @@ export class Editors {
       automaticLayout: true,
       readOnly: true,
       originalEditable: false,
-      fontFamily: '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
+      fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
       fontSize: 13,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
