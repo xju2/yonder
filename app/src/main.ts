@@ -218,15 +218,16 @@ async function copyPath(path: string | null, relative: boolean) {
   }
 }
 
-const pathMenu = (path: string) =>
+const pathMenu = (path: string, reload: (() => void) | null = null) =>
   void Menu.new({
     items: [
+      ...(reload ? [{ text: "Reload", action: reload }] : []),
       { text: "Copy Path", action: () => void copyPath(path, false) },
       { text: "Copy Relative Path", action: () => void copyPath(path, true) },
     ],
   }).then((m) => m.popup());
 
-const tree = new FileTree($("tree"), (path) => void editors.open(path), pathMenu);
+const tree = new FileTree($("tree"), (path) => void editors.open(path), (path) => pathMenu(path));
 const editors = new Editors(
   $("editor"),
   $("viewer"),

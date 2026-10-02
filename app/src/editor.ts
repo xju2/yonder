@@ -124,7 +124,7 @@ export class Editors {
     private onActive: (path: string | null) => void,
     private position: (text: string) => void,
     private onSaved: () => void,
-    private onTabMenu: (path: string) => void,
+    private onTabMenu: (path: string, reload: (() => void) | null) => void,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -530,8 +530,14 @@ export class Editors {
     });
     tab.el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
+      // Reload would throw away unsaved edits, so those tabs don't offer it.
+      const reload = tab.viewer
+        ? () => void this.refreshViewer(tab, true)
+        : tab.model && !this.isDirty(tab)
+          ? () => void this.reload(tab)
+          : null;
       // A diff tab's key is diff:<rev>:<file>.
-      this.onTabMenu(tab.path.replace(/^diff:[^:]*:/, ""));
+      this.onTabMenu(tab.path.replace(/^diff:[^:]*:/, ""), reload);
     });
     this.tabsEl.append(tab.el);
   }

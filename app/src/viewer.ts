@@ -116,7 +116,10 @@ class ImageViewer implements Viewer {
     this.img.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       void Menu.new({
-        items: [{ text: "Copy Image", action: () => void this.copy() }],
+        items: [
+          { text: "Copy Image", action: () => void this.copy() },
+          { text: "Reload", action: onReload },
+        ],
       }).then((m) => m.popup());
     });
     this.fitBtn = button("Actual size", "Toggle between fit to window and actual size", () =>
