@@ -312,6 +312,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 .image-stage {
   flex: 1;
+  min-height: 0;
+  container-type: size;
   overflow: auto;
   display: grid;
   place-items: center;
@@ -324,7 +326,12 @@ button:disabled { opacity: 0.6; cursor: default; }
   cursor: zoom-in;
   image-rendering: auto;
 }
-.image-viewer.fit .image-stage img { max-width: 100%; max-height: 100%; cursor: zoom-out; object-fit: contain; }
+/* Fit scales up as well as down; --ar is the image's width / height. */
+.image-viewer.fit .image-stage img {
+  width: min(100cqw, 100cqh * var(--ar, 1));
+  height: auto;
+  cursor: zoom-out;
+}
 .image-viewer.fit .image-stage { overflow: hidden; }
 
 .pdf-pages {

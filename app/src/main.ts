@@ -218,17 +218,15 @@ async function copyPath(path: string | null, relative: boolean) {
   }
 }
 
-const tree = new FileTree(
-  $("tree"),
-  (path) => void editors.open(path),
-  (path) =>
-    void Menu.new({
-      items: [
-        { text: "Copy Path", action: () => void copyPath(path, false) },
-        { text: "Copy Relative Path", action: () => void copyPath(path, true) },
-      ],
-    }).then((m) => m.popup()),
-);
+const pathMenu = (path: string) =>
+  void Menu.new({
+    items: [
+      { text: "Copy Path", action: () => void copyPath(path, false) },
+      { text: "Copy Relative Path", action: () => void copyPath(path, true) },
+    ],
+  }).then((m) => m.popup());
+
+const tree = new FileTree($("tree"), (path) => void editors.open(path), pathMenu);
 const editors = new Editors(
   $("editor"),
   $("viewer"),
@@ -239,6 +237,7 @@ const editors = new Editors(
   (path) => tree.setActive(path),
   (pos) => ($("status-pos").textContent = pos),
   () => void git.refreshChanges(),
+  pathMenu,
 );
 const finder = new Finder(
   () => (conn && !workspace.hidden ? conn.root : null),

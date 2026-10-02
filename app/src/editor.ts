@@ -124,6 +124,7 @@ export class Editors {
     private onActive: (path: string | null) => void,
     private position: (text: string) => void,
     private onSaved: () => void,
+    private onTabMenu: (path: string) => void,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -526,6 +527,11 @@ export class Editors {
     tab.el.addEventListener("click", () => this.show(tab));
     tab.el.addEventListener("auxclick", (e) => {
       if (e.button === 1) void this.close(tab);
+    });
+    tab.el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      // A diff tab's key is diff:<rev>:<file>.
+      this.onTabMenu(tab.path.replace(/^diff:[^:]*:/, ""));
     });
     this.tabsEl.append(tab.el);
   }

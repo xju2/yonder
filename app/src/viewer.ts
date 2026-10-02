@@ -152,6 +152,7 @@ class ImageViewer implements Viewer {
       URL.revokeObjectURL(url);
       throw new Error("the image could not be decoded");
     }
+    this.img.style.setProperty("--ar", String(probe.naturalWidth / probe.naturalHeight || 1));
     this.img.src = url;
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = url;
