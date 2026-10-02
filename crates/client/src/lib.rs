@@ -7,6 +7,7 @@
 //! short-lived certificates all work as they do in a terminal; using a single
 //! session means one authentication per connect.
 
+pub mod askpass;
 mod bootstrap;
 mod connection;
 pub mod git;

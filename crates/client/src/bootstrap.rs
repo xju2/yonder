@@ -33,6 +33,9 @@ pub struct ConnectOptions {
     pub ssh_program: PathBuf,
     /// Where to look for agent builds; see [`find_agent`].
     pub agent_dirs: Vec<PathBuf>,
+    /// Ask passwords, one-time codes and host-key questions through the
+    /// app. Without it ssh runs in batch mode and such prompts fail.
+    pub askpass: Option<crate::askpass::Askpass>,
 }
 
 impl ConnectOptions {
@@ -43,6 +46,7 @@ impl ConnectOptions {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| "ssh".into()),
             agent_dirs,
+            askpass: None,
         }
     }
 }
@@ -207,13 +211,27 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
         level: Level::Step,
         message: format!("Starting {} {host}", opts.ssh_program.display()),
     });
-    let mut child = Command::new(&opts.ssh_program)
+    let mut cmd = Command::new(&opts.ssh_program);
+    match &opts.askpass {
+        // ssh has no terminal here, so it asks through the app instead.
+        Some(askpass) => {
+            cmd.env("SSH_ASKPASS", &askpass.program)
+                .env("SSH_ASKPASS_REQUIRE", "force")
+                .env(crate::askpass::SOCKET_ENV, &askpass.socket);
+            // Older OpenSSH only uses SSH_ASKPASS when DISPLAY is set.
+            if std::env::var_os("DISPLAY").is_none() {
+                cmd.env("DISPLAY", ":0");
+            }
+        }
+        // Fail with a clear message instead of waiting on a prompt that
+        // nobody can see.
+        None => {
+            cmd.args(["-o", "BatchMode=yes"]);
+        }
+    }
+    let mut child = cmd
         .args([
             "-T",
-            // Fail with a clear message instead of waiting on a prompt that
-            // nobody can see.
-            "-o",
-            "BatchMode=yes",
             "-o",
             "ConnectTimeout=15",
             // Notice a dead network within about a minute.
@@ -267,7 +285,11 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
     };
 
     s.step(format!("Waiting for {host} to answer"));
-    let hello = s.marker(&["YONDER-HELLO"], Duration::from_secs(45)).await?;
+    // Typing a password and a one-time code takes a while.
+    let answer_time = if opts.askpass.is_some() { 300 } else { 45 };
+    let hello = s
+        .marker(&["YONDER-HELLO"], Duration::from_secs(answer_time))
+        .await?;
     let mut fields = hello.split_whitespace().skip(1);
     let os = fields.next().unwrap_or_default().to_string();
     let arch = match fields.next().unwrap_or_default() {
@@ -338,6 +360,9 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
         log: session_log,
         ..
     } = s;
+    // What ssh said while logging in (a mistyped password, say) is history;
+    // a later disconnect should not be blamed on it.
+    stderr_tail.lock().unwrap().clear();
     let conn = Connection::start(child, stdin, stdout, stderr_tail, session_log);
     let info = match timeout(Duration::from_secs(30), conn.call(Op::Hello)).await {
         Ok(Ok(Reply::Hello(info))) => info,
@@ -382,12 +407,12 @@ fn agent_hash(bytes: &[u8]) -> String {
 fn hint_for(stderr: &str) -> Option<String> {
     let s = stderr.to_ascii_lowercase();
     let hint = if s.contains("permission denied") {
-        "Authentication failed. Yonder runs ssh without a terminal, so it cannot answer \
-         password or MFA prompts. Check that `ssh -o BatchMode=yes <host> true` works in a \
-         terminal: load your key into ssh-agent, or renew a short-lived key or certificate."
+        "Authentication failed. Check the password or one-time code, or that `ssh <host>` \
+         works in a terminal; for keys, load them into ssh-agent or renew a short-lived key \
+         or certificate."
     } else if s.contains("host key verification failed") {
-        "The host key is unknown or has changed. Connect once with plain `ssh` in a terminal \
-         to review and accept it."
+        "The host key was not accepted, or it changed since you last connected. If it changed \
+         unexpectedly, check with the system's administrators before trusting it."
     } else if s.contains("could not resolve hostname") {
         "Check the host name, or the Host entry in ~/.ssh/config."
     } else if s.contains("timed out") || s.contains("no route to host") {
@@ -420,7 +445,7 @@ mod tests {
     fn hints() {
         assert!(hint_for("user@host: Permission denied (publickey).")
             .unwrap()
-            .contains("BatchMode"));
+            .contains("Authentication failed"));
         assert!(hint_for("head: write error: Disk quota exceeded")
             .unwrap()
             .contains("cache"));

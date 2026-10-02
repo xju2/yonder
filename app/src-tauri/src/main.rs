@@ -7,10 +7,12 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody, Response};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Wry};
+use yonder_client::askpass::{self, Askpass};
 use yonder_client::git::{self, Change, Commit, Status};
 use yonder_client::{connect as open_connection, ConnectOptions, Connection, Level, LogLine};
 use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Event, Op, Reply};
@@ -29,6 +31,15 @@ struct AppState {
     /// from one it already replaced.
     generation: AtomicU64,
     terminals: Arc<Mutex<Terminals>>,
+    /// The UI has unsaved edits; quitting must ask first.
+    unsaved: AtomicBool,
+    /// Lets ssh ask for passwords and one-time codes through the window.
+    askpass: Mutex<Option<(askpass::Server, Askpass)>>,
+    /// Questions from ssh waiting for the person's answer, by id.
+    prompts: Arc<Mutex<HashMap<u64, std::sync::mpsc::Sender<Option<String>>>>>,
+    /// Set when the person cancels a question: ssh would otherwise ask the
+    /// same question again, so the rest of this login attempt is declined.
+    prompts_cancelled: Arc<AtomicBool>,
 }
 
 /// Where each terminal's output goes. Output can arrive before `pty_open`
@@ -200,7 +211,14 @@ async fn connect(
             },
         );
     });
-    let opts = ConnectOptions::new(host.clone(), agent_dirs(&app));
+    state.prompts_cancelled.store(false, Ordering::Relaxed);
+    let mut opts = ConnectOptions::new(host.clone(), agent_dirs(&app));
+    opts.askpass = state
+        .askpass
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(_, a)| a.clone());
     let conn = open_connection(&opts, log).await.map_err(|e| CmdError {
         kind: "connect",
         message: format!("{}: {}", e.step, e.message),
@@ -578,7 +596,128 @@ async fn write_file(
     }
 }
 
+// ---- ssh questions (passwords, one-time codes, host keys)
+
+#[derive(Serialize, Clone)]
+struct AskpassEvent {
+    id: u64,
+    prompt: String,
+}
+
+/// Start answering ssh's questions through the UI. Each question becomes an
+/// `askpass` event; the UI replies with `askpass_answer`.
+fn start_askpass(app: &AppHandle) {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let state = app.state::<AppState>();
+    let prompts = Arc::clone(&state.prompts);
+    let cancelled = Arc::clone(&state.prompts_cancelled);
+    let handle = app.clone();
+    let handler: askpass::Handler = Arc::new(move |prompt: String| {
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = std::sync::mpsc::channel();
+        prompts.lock().unwrap().insert(id, tx);
+        let _ = handle.emit("askpass", AskpassEvent { id, prompt });
+        // ssh gives up on its own after a while; so do we.
+        let answer = rx
+            .recv_timeout(std::time::Duration::from_secs(300))
+            .ok()
+            .flatten();
+        prompts.lock().unwrap().remove(&id);
+        answer
+    });
+    match askpass::Server::start(handler).and_then(|s| s.askpass().map(|a| (s, a))) {
+        Ok(pair) => *state.askpass.lock().unwrap() = Some(pair),
+        // Without it, ssh runs in batch mode: keys only, as before.
+        Err(e) => eprintln!("yonder: password prompts unavailable: {e}"),
+    }
+}
+
+/// The person's answer to an ssh question; `None` cancels.
+#[tauri::command]
+fn askpass_answer(state: State<'_, AppState>, id: u64, answer: Option<String>) {
+    if answer.is_none() {
+        state.prompts_cancelled.store(true, Ordering::Relaxed);
+    }
+    if let Some(tx) = state.prompts.lock().unwrap().remove(&id) {
+        let _ = tx.send(answer);
+    }
+}
+
+// ---- quitting with unsaved edits
+
+/// The UI reports whether any tab has unsaved edits.
+#[tauri::command]
+fn set_unsaved(state: State<'_, AppState>, unsaved: bool) {
+    state.unsaved.store(unsaved, Ordering::Relaxed);
+}
+
+/// Quit now: the person already decided about unsaved edits.
+#[tauri::command]
+fn quit_app(app: AppHandle, state: State<'_, AppState>) {
+    state.unsaved.store(false, Ordering::Relaxed);
+    if let Some(conn) = state.conn.lock().unwrap().take() {
+        conn.close();
+    }
+    app.exit(0);
+}
+
+/// Quit, or with unsaved edits ask the UI to confirm first.
+fn request_quit(app: &AppHandle) -> bool {
+    if app.state::<AppState>().unsaved.load(Ordering::Relaxed) {
+        let _ = app.emit("quit-requested", ());
+        false
+    } else {
+        true
+    }
+}
+
+/// The standard macOS menus, except that Quit goes through `request_quit`.
+fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let quit = MenuItemBuilder::with_id("quit", "Quit Yonder")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)?;
+    let app_menu = SubmenuBuilder::new(app, "Yonder")
+        .about(None)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&quit)
+        .build()?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .close_window()
+        .build()?;
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &edit, &window])
+        .build()
+}
+
 fn main() {
+    // Started by ssh as SSH_ASKPASS: pass the question to the running app,
+    // print its answer, and exit without opening a window.
+    if let Some(socket) = std::env::var_os(askpass::SOCKET_ENV) {
+        let prompt = std::env::args().nth(1).unwrap_or_default();
+        std::process::exit(askpass::client(std::path::Path::new(&socket), &prompt));
+    }
+
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -597,8 +736,33 @@ fn main() {
             git_status,
             git_log,
             git_commit_files,
-            git_diff
+            git_diff,
+            set_unsaved,
+            quit_app,
+            askpass_answer
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Yonder");
+        .setup(|app| {
+            start_askpass(app.handle());
+            Ok(())
+        })
+        .menu(build_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == "quit" && request_quit(app) {
+                app.exit(0);
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while starting Yonder")
+        .run(|app, event| {
+            // Quitting from the Dock, or the last window closing: with
+            // unsaved edits, ask first. `code` is set when we exit on purpose.
+            if let RunEvent::ExitRequested {
+                api, code: None, ..
+            } = event
+            {
+                if !request_quit(app) {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
