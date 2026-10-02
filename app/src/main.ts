@@ -1,3 +1,4 @@
+import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
@@ -203,7 +204,31 @@ window.addEventListener("online", () => {
 
 // ---- views
 
-const tree = new FileTree($("tree"), (path) => void editors.open(path));
+async function copyPath(path: string | null, relative: boolean) {
+  if (!path || !conn) return;
+  const root = conn.root.replace(/\/$/, "");
+  let text = path;
+  if (relative && path === root) text = ".";
+  else if (relative && path.startsWith(root + "/")) text = path.slice(root.length + 1);
+  try {
+    await api.copyText(text);
+    status(`Copied ${text}`);
+  } catch (e) {
+    status(`Could not copy: ${api.asError(e).message}`);
+  }
+}
+
+const tree = new FileTree(
+  $("tree"),
+  (path) => void editors.open(path),
+  (path) =>
+    void Menu.new({
+      items: [
+        { text: "Copy Path", action: () => void copyPath(path, false) },
+        { text: "Copy Relative Path", action: () => void copyPath(path, true) },
+      ],
+    }).then((m) => m.popup()),
+);
 const editors = new Editors(
   $("editor"),
   $("viewer"),
@@ -229,6 +254,8 @@ void api.onMenu((id) => {
   if (id === "go-to-file") void finder.open();
   else if (id === "toggle-sidebar") toggleSidebar();
   else if (id === "markdown-preview") editors.togglePreview();
+  else if (id === "copy-path") void copyPath(tree.chosen(), false);
+  else if (id === "copy-relative-path") void copyPath(tree.chosen(), true);
   // Cmd+W closes the terminal that has the keyboard, else the editor tab.
   else if (id === "close-tab" && !terminals.closeFocused()) editors.closeActive();
 });

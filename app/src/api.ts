@@ -172,6 +172,9 @@ export const quitApp = () => invoke<void>("quit_app");
 export const onQuitRequested = (f: () => void): Promise<UnlistenFn> =>
   listen("quit-requested", () => f());
 
+/** Put text on the clipboard. */
+export const copyText = (text: string) => invoke<void>("copy_text", { text });
+
 /** A File or View menu item (or its shortcut) was chosen. */
 export const onMenu = (f: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("menu", (e) => f(e.payload));

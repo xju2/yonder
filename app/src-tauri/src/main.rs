@@ -671,6 +671,20 @@ fn quit_app(app: AppHandle, state: State<'_, AppState>) {
     app.exit(0);
 }
 
+/// Puts text on the clipboard. The web clipboard API wants a click in the
+/// page, which a menu item is not.
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pbcopy: {e}"))?;
+    let written = child.stdin.take().unwrap().write_all(text.as_bytes());
+    child.wait().map_err(|e| format!("pbcopy: {e}"))?;
+    written.map_err(|e| format!("pbcopy: {e}"))
+}
+
 /// Whether a quit may go ahead now. While a window is open, the UI decides:
 /// it checks for unsaved edits at that moment, asks if there are any, and
 /// calls `quit_app`. A copy of that state kept here could be stale.
@@ -705,6 +719,17 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(
             &MenuItemBuilder::with_id("go-to-file", "Go to File…")
                 .accelerator("CmdOrCtrl+P")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("copy-path", "Copy Path")
+                .accelerator("CmdOrCtrl+Alt+C")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("copy-relative-path", "Copy Relative Path")
+                .accelerator("CmdOrCtrl+Alt+Shift+C")
                 .build(app)?,
         )
         .separator()
@@ -773,6 +798,7 @@ fn main() {
             git_diff,
             git_files,
             quit_app,
+            copy_text,
             askpass_answer
         ])
         .setup(|app| {
@@ -782,7 +808,8 @@ fn main() {
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" if request_quit(app) => app.exit(0),
-            id @ ("go-to-file" | "close-tab" | "toggle-sidebar" | "markdown-preview") => {
+            id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
+            | "toggle-sidebar" | "markdown-preview") => {
                 let _ = app.emit("menu", id);
             }
             _ => {}

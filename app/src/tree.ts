@@ -56,6 +56,7 @@ export class FileTree {
   constructor(
     private container: HTMLElement,
     private onOpen: (path: string) => void,
+    private onMenu: (path: string) => void,
   ) {}
 
   async setRoot(path: string) {
@@ -130,6 +131,14 @@ export class FileTree {
     if (path) this.container.querySelector(`.row[data-path="${CSS.escape(path)}"]`)?.classList.add("active");
   }
 
+  /** The row with the keyboard, else the open file. */
+  chosen(): string | null {
+    const r = document.activeElement;
+    return r instanceof HTMLElement && r.classList.contains("row") && this.container.contains(r)
+      ? r.dataset.path!
+      : this.active;
+  }
+
   private makeNode(e: Entry, path: string): Node {
     const li = document.createElement("li");
     const node: Node = {
@@ -163,6 +172,11 @@ export class FileTree {
     this.paintGit(row);
     row.addEventListener("click", () => this.activate(node));
     row.addEventListener("keydown", (ev) => this.onKey(ev, node));
+    row.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      row.focus();
+      this.onMenu(path);
+    });
     li.append(row);
     this.paintTwisty(node);
     return node;
