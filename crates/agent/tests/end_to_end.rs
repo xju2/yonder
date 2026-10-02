@@ -160,6 +160,15 @@ async fn file_operations_over_the_connection() {
 #[tokio::test]
 async fn agent_exit_is_noticed() {
     let fx = Fixture::new("");
+    // ssh complaining during login, like a mistyped first password.
+    let ssh = fx.root.path().join("ssh");
+    let script = std::fs::read_to_string(&ssh).unwrap().replacen(
+        "exec sh",
+        // Then quiet, like real ssh once logged in.
+        "echo 'Permission denied, please try again.' >&2\nexec 2>/dev/null\nexec sh",
+        1,
+    );
+    std::fs::write(&ssh, script).unwrap();
     let (_, sink) = collect_log();
     let conn = connect(&fx.options(), sink).await.unwrap();
     let pid = conn.info().pid;
@@ -171,6 +180,8 @@ async fn agent_exit_is_noticed() {
         .await
         .expect("close was not noticed");
     assert!(reason.contains("agent exited"), "{reason}");
+    // What ssh said while logging in is not blamed for the disconnect.
+    assert!(!reason.contains("Permission denied"), "{reason}");
 }
 
 #[tokio::test]
@@ -184,7 +195,7 @@ async fn reports_ssh_failure_with_hint() {
     let (_, sink) = collect_log();
     let err = connect(&fx.options(), sink).await.err().unwrap();
     assert!(err.message.contains("Permission denied"), "{err}");
-    assert!(err.hint.unwrap().contains("BatchMode"));
+    assert!(err.hint.unwrap().contains("Authentication failed"));
 }
 
 #[tokio::test]

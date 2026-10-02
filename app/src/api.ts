@@ -158,3 +158,25 @@ export const gitCommitFiles = (repo: string, hash: string) =>
 /** Without `rev`: HEAD against the working tree. With it: that commit against its parent. */
 export const gitDiff = (repo: string, path: string, oldPath: string | null, rev: string | null) =>
   invoke<GitDiff>("git_diff", { repo, path, oldPath, rev });
+
+// ---- quitting
+
+/** Whether any tab has unsaved edits, so quitting knows to ask first. */
+/** Quit without further questions. */
+export const quitApp = () => invoke<void>("quit_app");
+/** Cmd+Q or the Dock asked to quit while edits are unsaved. */
+export const onQuitRequested = (f: () => void): Promise<UnlistenFn> =>
+  listen("quit-requested", () => f());
+
+// ---- questions from ssh
+
+export interface AskpassEvent {
+  id: number;
+  prompt: string;
+}
+/** ssh asks for a password, a one-time code, or whether to trust a host key. */
+export const onAskpass = (f: (e: AskpassEvent) => void): Promise<UnlistenFn> =>
+  listen<AskpassEvent>("askpass", (e) => f(e.payload));
+/** `answer` null cancels, which makes ssh give up. */
+export const askpassAnswer = (id: number, answer: string | null) =>
+  invoke<void>("askpass_answer", { id, answer });

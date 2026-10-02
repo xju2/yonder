@@ -17,12 +17,9 @@ from `~/.ssh/config`. Yonder runs your own `ssh` binary, so ProxyJump,
 ssh-agent, ControlMaster and short-lived keys or certificates work as they do
 in a terminal.
 
-Yonder runs ssh non-interactively (`BatchMode=yes`), so it cannot answer
-password or MFA prompts yet. If this works in a terminal, Yonder will connect:
-
-```sh
-ssh -o BatchMode=yes <host> true
-```
+When ssh asks something (a password, a password plus one-time code, or
+whether to trust an unknown host key), Yonder shows the question in a
+dialog. Cancel ends that login attempt.
 
 - **Save:** <kbd>Cmd</kbd>+<kbd>S</kbd>. If the file changed on the remote
   since you opened it (a batch job rewrote it, say), Yonder asks before
@@ -43,7 +40,12 @@ ssh -o BatchMode=yes <host> true
   prints endlessly is paused rather than flooding the window, so
   <kbd>Ctrl</kbd>+<kbd>C</kbd> always answers at once. Terminals end with the
   connection; use `tmux` inside one if a session must survive.
-- **Lost connection:** open files and unsaved edits stay; press Reconnect.
+- **Lost connection:** open files and unsaved edits stay, and Yonder
+  reconnects on its own: after 1, 2, 5, 10, 20, then every 30 seconds, and at
+  once when the Mac comes back online. It stops when a person is needed (a
+  cancelled password, a rejected host key); press Try again then.
+- **Quitting** with unsaved edits, by <kbd>Cmd</kbd>+<kbd>Q</kbd>, the Dock or
+  closing the window, asks first.
 
 ## How it works
 
@@ -123,8 +125,8 @@ agent through a stand-in for `ssh`.
    open folders and open files is next.
 3. **Git and viewers** — done: changed files and history with diffs; image
    and PDF viewers.
-4. **Hardening:** automatic reconnect, password and MFA prompts, large-file
-   handling, signing.
+4. **Hardening:** automatic reconnect, password and MFA prompts, and asking
+   before quitting with unsaved edits are done; signing and notarization next.
 5. **AI suggestions (optional):** propose small edits, shown as a diff to
    accept or reject.
 

@@ -2,7 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
 import { GitPanel } from "./git";
-import { ask } from "./modal";
+import { ask, askText } from "./modal";
 import { TerminalPanel } from "./terminal";
 import { FileTree } from "./tree";
 
@@ -87,23 +87,117 @@ void api.onLog((e) => {
   if (e.level === "step") status(e.message);
 });
 
+// ssh's questions: passwords and one-time codes, or whether to trust a host.
+void api.onAskpass(async ({ id, prompt }) => {
+  const text = prompt.trim();
+  let answer: string | null;
+  if (/\(yes\/no/i.test(text)) {
+    const choice = await ask(
+      "Trust this host?",
+      [
+        { value: "no", label: "Cancel" },
+        { value: "yes", label: "Trust and connect", primary: true },
+      ],
+      text,
+    );
+    answer = choice === "yes" ? "yes" : null;
+  } else {
+    answer = await askText(text || "Password:", true, target.host ? `ssh ${target.host}` : undefined);
+  }
+  await api.askpassAnswer(id, answer);
+});
+
 void api.onClosed((e) => {
   if (!conn || e.generation !== conn.generation) return;
   statusConn.classList.add("down");
   terminals.disconnected();
-  showBanner(`Disconnected from ${conn.host}: ${e.reason}. Your open files and edits are kept.`);
+  scheduleReconnect(e.reason);
 });
 
-function showBanner(text: string) {
+// ---- reconnecting on its own
+
+/** Seconds between attempts; the last repeats. */
+const RETRY_DELAYS = [1, 2, 5, 10, 20, 30];
+const retry = { attempt: 0, timer: 0, tick: 0 };
+
+/** One connection attempt at a time: a second would share its password
+ * prompts, and whichever finished last would win. */
+let connecting = false;
+
+function stopRetrying() {
+  clearTimeout(retry.timer);
+  clearInterval(retry.tick);
+  retry.timer = retry.tick = 0;
+}
+
+function showBanner(text: string, button: string | null) {
   banner.replaceChildren();
   const span = document.createElement("span");
   span.textContent = text;
-  const btn = document.createElement("button");
-  btn.textContent = "Reconnect";
-  btn.addEventListener("click", () => void reconnect(btn));
-  banner.append(span, btn);
+  banner.append(span);
+  if (button) {
+    const btn = document.createElement("button");
+    btn.textContent = button;
+    btn.addEventListener("click", () => void reconnectNow());
+    banner.append(btn);
+  }
   banner.hidden = false;
 }
+
+function scheduleReconnect(reason: string) {
+  stopRetrying();
+  const host = conn?.host ?? target.host;
+  reason = reason.replace(/[.\s]+$/, "");
+  let left = RETRY_DELAYS[Math.min(retry.attempt, RETRY_DELAYS.length - 1)];
+  const paint = () =>
+    showBanner(
+      `Disconnected from ${host}: ${reason}. Reconnecting in ${left} s… Your open files and edits are kept.`,
+      "Reconnect now",
+    );
+  paint();
+  retry.tick = window.setInterval(() => {
+    left = Math.max(0, left - 1);
+    paint();
+  }, 1000);
+  retry.timer = window.setTimeout(() => void reconnectNow(), left * 1000);
+}
+
+/** Failures that retrying cannot fix: the person has to act. */
+function needsPerson(e: api.CmdError) {
+  return /permission denied|host key|authentication/i.test(`${e.message} ${e.hint ?? ""}`);
+}
+
+async function reconnectNow() {
+  if (connecting) return;
+  stopRetrying();
+  connecting = true;
+  showBanner(`Reconnecting to ${target.host}…`, null);
+  try {
+    const oldRoot = conn?.root;
+    const info = await api.connect(target.host, target.folder || "~");
+    retry.attempt = 0;
+    await startSession(info);
+    // The folder may resolve differently now (a moved symlink, say).
+    if (info.root === oldRoot) await tree.refresh();
+    else await tree.setRoot(info.root);
+    status(`Reconnected to ${info.host}`);
+  } catch (err) {
+    const ce = api.asError(err);
+    if (needsPerson(ce)) {
+      showBanner(`Could not reconnect: ${ce.message}`, "Try again");
+    } else {
+      retry.attempt++;
+      scheduleReconnect(ce.message);
+    }
+  } finally {
+    connecting = false;
+  }
+}
+
+// Back online after sleep or a network change: try at once.
+window.addEventListener("online", () => {
+  if (conn && statusConn.classList.contains("down")) void reconnectNow();
+});
 
 // ---- views
 
@@ -145,6 +239,8 @@ window.addEventListener(
 
 async function startSession(info: api.ConnInfo) {
   conn = info;
+  stopRetrying();
+  retry.attempt = 0;
   git.reset();
   if (sideView !== "files") void showSideView(sideView);
   connectView.hidden = true;
@@ -165,6 +261,8 @@ async function startSession(info: api.ConnInfo) {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (connecting) return;
+  connecting = true;
   target = { host: hostInput.value.trim(), folder: folderInput.value.trim() };
   connectLog.replaceChildren();
   connectError.hidden = true;
@@ -189,33 +287,11 @@ form.addEventListener("submit", async (e) => {
     }
     connectError.hidden = false;
   } finally {
+    connecting = false;
     connectBtn.disabled = false;
     connectBtn.textContent = "Connect";
   }
 });
-
-async function reconnect(btn: HTMLButtonElement) {
-  btn.disabled = true;
-  btn.textContent = "Reconnecting…";
-  try {
-    const oldRoot = conn?.root;
-    const info = await api.connect(target.host, target.folder || "~");
-    await startSession(info);
-    // The folder may resolve differently now (a moved symlink, say).
-    if (info.root === oldRoot) await tree.refresh();
-    else await tree.setRoot(info.root);
-    status(`Reconnected to ${info.host}`);
-  } catch (err) {
-    const ce = api.asError(err);
-    btn.disabled = false;
-    btn.textContent = "Reconnect";
-    await ask(
-      "Could not reconnect.",
-      [{ value: "ok", label: "OK", primary: true }],
-      [ce.message, ce.hint].filter(Boolean).join("\n\n"),
-    );
-  }
-}
 
 $("refresh-tree").addEventListener("click", () => void tree.refresh());
 
@@ -316,19 +392,30 @@ sash.addEventListener("pointerdown", (e) => {
   });
 });
 
-// ---- closing the window with unsaved edits
+// ---- quitting or closing with unsaved edits
+
+let askingToQuit = false;
+async function confirmQuit() {
+  if (!editors.hasUnsaved()) return api.quitApp();
+  // Cmd+Q pressed twice should not stack two questions.
+  if (askingToQuit) return;
+  askingToQuit = true;
+  const choice = await ask("Some files have unsaved changes.", [
+    { value: "cancel", label: "Keep editing", primary: true },
+    { value: "quit", label: "Quit without saving", danger: true },
+  ]);
+  askingToQuit = false;
+  if (choice === "quit") await api.quitApp();
+}
+
+// Every quit (Cmd+Q, the Dock) is held until this answers, so the check
+// uses the editor's state at that moment.
+void api.onQuitRequested(() => void confirmQuit());
 
 void getCurrentWindow().onCloseRequested(async (event) => {
   if (!editors.hasUnsaved()) return;
   event.preventDefault();
-  const choice = await ask("Some files have unsaved changes.", [
-    { value: "cancel", label: "Keep editing", primary: true },
-    { value: "quit", label: "Close without saving", danger: true },
-  ]);
-  if (choice === "quit") {
-    await api.disconnect();
-    await getCurrentWindow().destroy();
-  }
+  await confirmQuit();
 });
 
 paintRecent();

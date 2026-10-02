@@ -433,4 +433,16 @@ button:disabled { opacity: 0.6; cursor: default; }
   max-height: 40vh;
   overflow: auto;
 }
+#modal-input {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 6px 8px;
+  font: 13px var(--mono);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+#modal-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #modal-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
