@@ -232,7 +232,12 @@ export class Editors {
       label: null,
       preview: null,
     };
-    const viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
+    const viewer = createViewer(
+      kind,
+      path,
+      () => void this.refreshViewer(tab, true),
+      (msg) => this.status(msg),
+    );
     tab.viewer = viewer;
     // Reloads requested while the first load runs wait for it.
     let firstLoaded!: () => void;

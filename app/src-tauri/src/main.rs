@@ -685,6 +685,29 @@ fn copy_text(text: String) -> Result<(), String> {
     written.map_err(|e| format!("pbcopy: {e}"))
 }
 
+/// Puts a PNG on the clipboard, and nothing else. WebKit's own Copy Image
+/// adds HTML pointing at a blob: URL only this app can open, which web apps
+/// such as Google Slides try to fetch and fail.
+#[tauri::command]
+fn copy_png(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("expected PNG bytes".into());
+    };
+    let path = std::env::temp_dir().join(format!("yonder-clip-{}.png", std::process::id()));
+    std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+    let script = format!(
+        "set the clipboard to (read (POSIX file \"{}\") as «class PNGf»)",
+        path.display()
+    );
+    let out = std::process::Command::new("osascript").args(["-e", &script]).output();
+    let _ = std::fs::remove_file(&path);
+    let out = out.map_err(|e| format!("osascript: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
 /// Whether a quit may go ahead now. While a window is open, the UI decides:
 /// it checks for unsaved edits at that moment, asks if there are any, and
 /// calls `quit_app`. A copy of that state kept here could be stale.
@@ -799,6 +822,7 @@ fn main() {
             git_files,
             quit_app,
             copy_text,
+            copy_png,
             askpass_answer
         ])
         .setup(|app| {

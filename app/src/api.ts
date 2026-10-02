@@ -174,6 +174,8 @@ export const onQuitRequested = (f: () => void): Promise<UnlistenFn> =>
 
 /** Put text on the clipboard. */
 export const copyText = (text: string) => invoke<void>("copy_text", { text });
+/** Put a PNG image, and only that, on the clipboard. */
+export const copyPng = (png: Uint8Array) => invoke<void>("copy_png", png);
 
 /** A File or View menu item (or its shortcut) was chosen. */
 export const onMenu = (f: (id: string) => void): Promise<UnlistenFn> =>

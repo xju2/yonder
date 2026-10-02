@@ -2,7 +2,9 @@
 // re-loaded with new bytes when the file changes on the remote (a plot that a
 // job regenerated), keeping the zoom and scroll position.
 
+import { Menu } from "@tauri-apps/api/menu";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import * as api from "./api";
 
 const IMAGE_TYPES: Record<string, string> = {
   png: "image/png",
@@ -36,8 +38,13 @@ export interface Viewer {
   dispose(): void;
 }
 
-export function createViewer(kind: ViewKind, path: string, onReload: () => void): Viewer {
-  return kind === "pdf" ? new PdfViewer(onReload) : new ImageViewer(path, onReload);
+export function createViewer(
+  kind: ViewKind,
+  path: string,
+  onReload: () => void,
+  status: (msg: string) => void,
+): Viewer {
+  return kind === "pdf" ? new PdfViewer(onReload) : new ImageViewer(path, onReload, status);
 }
 
 function button(label: string, title: string, onClick: () => void): HTMLButtonElement {
@@ -96,6 +103,7 @@ class ImageViewer implements Viewer {
   constructor(
     private path: string,
     onReload: () => void,
+    private status: (msg: string) => void,
   ) {
     this.el.className = "viewer image-viewer fit";
     const stage = document.createElement("div");
@@ -103,6 +111,14 @@ class ImageViewer implements Viewer {
     stage.append(this.img);
     // Clicking the image toggles between fitting the window and actual size.
     this.img.addEventListener("click", () => this.toggleFit());
+    // Our own menu instead of WebKit's: its Copy Image also puts HTML with a
+    // blob: URL on the clipboard, which Google Slides fails to fetch.
+    this.img.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      void Menu.new({
+        items: [{ text: "Copy Image", action: () => void this.copy() }],
+      }).then((m) => m.popup());
+    });
     this.fitBtn = button("Actual size", "Toggle between fit to window and actual size", () =>
       this.toggleFit(),
     );
@@ -145,6 +161,22 @@ class ImageViewer implements Viewer {
 
   info() {
     return this.size;
+  }
+
+  /** Copy the picture as PNG (any format, SVG included, is redrawn as one). */
+  private async copy() {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = this.img.naturalWidth;
+      canvas.height = this.img.naturalHeight;
+      canvas.getContext("2d")!.drawImage(this.img, 0, 0);
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+      if (!blob) throw new Error("the image could not be encoded");
+      await api.copyPng(new Uint8Array(await blob.arrayBuffer()));
+      this.status("Copied image");
+    } catch (e) {
+      this.status(`Could not copy: ${api.asError(e).message}`);
+    }
   }
 
   dispose() {
