@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -21,9 +21,13 @@ pub const MAX_FRAME: usize = 256 << 20;
 /// App -> agent.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Request {
+    /// Echoed in the response. A request with id [`NO_REPLY`] gets none;
+    /// keystrokes use it, since nothing waits for their answer.
     pub id: u64,
     pub op: Op,
 }
+
+pub const NO_REPLY: u64 = 0;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Op {
@@ -59,6 +63,37 @@ pub enum Op {
         data: Vec<u8>,
         expected_hash: Option<u64>,
     },
+    /// Start the login shell on a new pseudo-terminal. Output arrives as
+    /// [`Event::PtyOutput`]; the end as [`Event::PtyExit`].
+    PtyOpen {
+        cols: u16,
+        rows: u16,
+        /// Starting directory; `$HOME` if `None`.
+        cwd: Option<String>,
+    },
+    /// Keystrokes or pasted text. Handled in arrival order.
+    PtyInput {
+        pty: u64,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    PtyResize {
+        pty: u64,
+        cols: u16,
+        rows: u16,
+    },
+    /// The app has drawn `bytes` more of the terminal's output. The agent
+    /// stops reading a terminal that is far ahead of the screen, so a runaway
+    /// program blocks as it would in a local terminal instead of flooding the
+    /// connection, and Ctrl-C stays responsive.
+    PtyAck {
+        pty: u64,
+        bytes: u64,
+    },
+    /// Hang up the terminal: its processes get SIGHUP.
+    PtyClose {
+        pty: u64,
+    },
 }
 
 /// Agent -> app.
@@ -68,6 +103,19 @@ pub enum AgentMsg {
         id: u64,
         result: Result<Reply, Error>,
     },
+    /// Sent by the agent on its own, not in answer to a request.
+    Event(Event),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum Event {
+    PtyOutput {
+        pty: u64,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    /// The shell exited. `code` is `None` if a signal ended it.
+    PtyExit { pty: u64, code: Option<i32> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -79,6 +127,10 @@ pub enum Reply {
     },
     Entries(Vec<Entry>),
     Stat(FileStat),
+    Pty {
+        pty: u64,
+    },
+    Done,
     File {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,

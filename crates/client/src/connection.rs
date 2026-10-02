@@ -7,7 +7,8 @@ use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin};
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use yonder_proto::{
-    decode, encode, frame_len, AgentMsg, Error, ErrorKind, HelloInfo, Op, Reply, Request,
+    decode, encode, frame_len, AgentMsg, Error, ErrorKind, Event, HelloInfo, Op, Reply, Request,
+    NO_REPLY,
 };
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Reply, Error>>>>>;
@@ -20,6 +21,7 @@ pub struct Connection {
     closed: watch::Receiver<Option<String>>,
     kill: Arc<Notify>,
     pub(crate) info: OnceLock<HelloInfo>,
+    events: Mutex<Option<mpsc::UnboundedReceiver<Event>>>,
 }
 
 impl Connection {
@@ -34,6 +36,7 @@ impl Connection {
         R: AsyncBufRead + Unpin + Send + 'static,
     {
         let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (events_tx, events) = mpsc::unbounded_channel::<Event>();
         let pending: Pending = Arc::default();
         let (closed_tx, closed) = watch::channel(None);
         let kill = Arc::new(Notify::new());
@@ -51,7 +54,7 @@ impl Connection {
         let reader_kill = Arc::clone(&kill);
         tokio::spawn(async move {
             let reason = tokio::select! {
-                r = read_loop(&mut stdout, &reader_pending) => r,
+                r = read_loop(&mut stdout, &reader_pending, &events_tx) => r,
                 _ = reader_kill.notified() => {
                     let _ = child.start_kill();
                     "disconnected".to_string()
@@ -87,6 +90,7 @@ impl Connection {
             closed,
             kill,
             info: OnceLock::new(),
+            events: Mutex::new(Some(events)),
         }
     }
 
@@ -95,6 +99,22 @@ impl Connection {
         self.info
             .get()
             .expect("connect() sets info before returning")
+    }
+
+    /// Events the agent sends on its own, such as terminal output. There is
+    /// one stream per connection; the first caller gets it.
+    pub fn take_events(&self) -> Option<mpsc::UnboundedReceiver<Event>> {
+        self.events.lock().unwrap().take()
+    }
+
+    /// Send without waiting for, or receiving, an answer. Requests sent this
+    /// way reach the agent in the order they were sent, which keystrokes need.
+    pub fn send(&self, op: Op) -> Result<(), Error> {
+        let frame = encode(&Request { id: NO_REPLY, op }).map_err(Error::from)?;
+        match self.tx.lock().unwrap().as_ref() {
+            Some(s) if self.closed.borrow().is_none() && s.send(frame).is_ok() => Ok(()),
+            _ => Err(disconnected()),
+        }
     }
 
     pub async fn call(&self, op: Op) -> Result<Reply, Error> {
@@ -150,7 +170,11 @@ fn disconnected() -> Error {
     Error::new(ErrorKind::Disconnected, "not connected to the remote")
 }
 
-async fn read_loop<R: AsyncBufRead + Unpin>(stdout: &mut R, pending: &Pending) -> String {
+async fn read_loop<R: AsyncBufRead + Unpin>(
+    stdout: &mut R,
+    pending: &Pending,
+    events: &mpsc::UnboundedSender<Event>,
+) -> String {
     loop {
         let mut prefix = [0u8; 4];
         if let Err(e) = stdout.read_exact(&mut prefix).await {
@@ -173,6 +197,10 @@ async fn read_loop<R: AsyncBufRead + Unpin>(stdout: &mut R, pending: &Pending) -
                 if let Some(waiter) = pending.lock().unwrap().remove(&id) {
                     let _ = waiter.send(result);
                 }
+            }
+            Ok(AgentMsg::Event(event)) => {
+                // Nobody listening is fine: the events are just dropped.
+                let _ = events.send(event);
             }
             Err(e) => return format!("bad message from agent: {e}"),
         }

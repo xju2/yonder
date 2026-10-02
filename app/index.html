@@ -31,14 +31,26 @@
       <main id="main">
         <nav id="tabs"></nav>
         <div id="banner" hidden></div>
-        <div id="editor"></div>
-        <div id="viewer" hidden></div>
-        <div id="placeholder">Open a file from the tree.</div>
+        <div id="content">
+          <div id="editor"></div>
+          <div id="viewer" hidden></div>
+          <div id="placeholder">Open a file from the tree.</div>
+        </div>
+        <div id="panel-sash" hidden></div>
+        <section id="terminal-panel" hidden>
+          <header>
+            <nav id="term-tabs"></nav>
+            <button id="term-new" title="New terminal" aria-label="New terminal">+</button>
+            <button id="term-hide" title="Hide terminals (Ctrl+`)" aria-label="Hide terminals">⌄</button>
+          </header>
+          <div id="term-body"></div>
+        </section>
       </main>
       <footer id="status">
         <span id="status-conn"></span>
         <span id="status-msg"></span>
         <span id="status-pos"></span>
+        <button id="toggle-terminal" title="Show or hide terminals (Ctrl+`)">Terminal</button>
       </footer>
     </section>
 

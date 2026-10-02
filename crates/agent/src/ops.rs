@@ -20,6 +20,10 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
             data,
             expected_hash,
         } => write_file(Path::new(&path), &data, expected_hash),
+        other => Err(Error::new(
+            ErrorKind::Other,
+            format!("not a file request: {other:?}"),
+        )),
     }
 }
 

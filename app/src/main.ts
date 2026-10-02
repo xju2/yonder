@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
 import { ask } from "./modal";
+import { TerminalPanel } from "./terminal";
 import { FileTree } from "./tree";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -88,6 +89,7 @@ void api.onLog((e) => {
 void api.onClosed((e) => {
   if (!conn || e.generation !== conn.generation) return;
   statusConn.classList.add("down");
+  terminals.disconnected();
   showBanner(`Disconnected from ${conn.host}: ${e.reason}. Your open files and edits are kept.`);
 });
 
@@ -113,6 +115,30 @@ const editors = new Editors(
   (msg) => status(msg),
   (path) => tree.setActive(path),
   (pos) => ($("status-pos").textContent = pos),
+);
+const terminals = new TerminalPanel(
+  $("terminal-panel"),
+  $("panel-sash"),
+  $("term-tabs"),
+  $("term-body"),
+  () => conn?.root ?? null,
+);
+
+$("toggle-terminal").addEventListener("click", () => terminals.toggle());
+$("term-new").addEventListener("click", () => void terminals.create());
+$("term-hide").addEventListener("click", () => terminals.hide());
+// Ctrl+` shows and hides terminals, as in most editors. Caught before the
+// editor or a terminal sees it.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.ctrlKey && e.key === "`" && conn && !workspace.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      terminals.toggle();
+    }
+  },
+  true,
 );
 
 async function startSession(info: api.ConnInfo) {
@@ -195,6 +221,22 @@ window.addEventListener("focus", () => {
   if (!conn || workspace.hidden) return;
   void tree.refresh();
   editors.refreshActive();
+});
+
+// ---- terminal panel height
+
+const panelSash = $("panel-sash");
+panelSash.addEventListener("pointerdown", (e) => {
+  panelSash.setPointerCapture(e.pointerId);
+  const main = $("main").getBoundingClientRect();
+  const move = (ev: PointerEvent) => {
+    const h = Math.min(Math.max(main.bottom - ev.clientY, 80), main.height - 120);
+    document.documentElement.style.setProperty("--panel-height", `${h}px`);
+  };
+  panelSash.addEventListener("pointermove", move);
+  panelSash.addEventListener("pointerup", () => panelSash.removeEventListener("pointermove", move), {
+    once: true,
+  });
 });
 
 // ---- sidebar width

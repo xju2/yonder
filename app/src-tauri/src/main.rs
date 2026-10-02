@@ -5,12 +5,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{ipc::Response, AppHandle, Emitter, Manager, State};
+use tauri::ipc::{Channel, InvokeResponseBody, Response};
+use tauri::{AppHandle, Emitter, Manager, State};
 use yonder_client::{connect as open_connection, ConnectOptions, Connection, Level, LogLine};
-use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Op, Reply};
+use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Event, Op, Reply};
 
 /// Text files larger than this are refused: the editor gets sluggish well
 /// before, and such files are rarely meant to be edited by hand.
@@ -25,6 +27,59 @@ struct AppState {
     /// Identifies a connection, so the UI can ignore a late "closed" event
     /// from one it already replaced.
     generation: AtomicU64,
+    terminals: Arc<Mutex<Terminals>>,
+}
+
+/// Where each terminal's output goes. Output can arrive before `pty_open`
+/// has returned the terminal's id to the UI, so it is held until then.
+#[derive(Default)]
+struct Terminals {
+    /// The connection these terminals belong to; ids restart with each agent.
+    generation: u64,
+    channels: HashMap<u64, Channel<InvokeResponseBody>>,
+    early_output: HashMap<u64, Vec<Vec<u8>>>,
+    early_exit: HashMap<u64, Option<i32>>,
+}
+
+#[derive(Serialize, Clone)]
+struct PtyExitEvent {
+    pty: u64,
+    code: Option<i32>,
+}
+
+/// Route the agent's terminal events to the UI until the connection ends.
+fn forward_events(
+    app: AppHandle,
+    conn: &Connection,
+    terminals: Arc<Mutex<Terminals>>,
+    generation: u64,
+) {
+    let Some(mut events) = conn.take_events() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let mut t = terminals.lock().unwrap();
+            if t.generation != generation {
+                return;
+            }
+            match event {
+                Event::PtyOutput { pty, data } => match t.channels.get(&pty) {
+                    Some(ch) => {
+                        let _ = ch.send(InvokeResponseBody::Raw(data));
+                    }
+                    None => t.early_output.entry(pty).or_default().push(data),
+                },
+                Event::PtyExit { pty, code } => {
+                    if t.channels.remove(&pty).is_some() {
+                        let _ = app.emit("pty-exit", PtyExitEvent { pty, code });
+                    } else {
+                        t.early_exit.insert(pty, code);
+                    }
+                }
+            }
+        }
+    });
 }
 
 impl AppState {
@@ -172,6 +227,11 @@ async fn connect(
         home: conn.info().home.clone(),
     };
     *state.conn.lock().unwrap() = Some(Arc::clone(&conn));
+    *state.terminals.lock().unwrap() = Terminals {
+        generation,
+        ..Default::default()
+    };
+    forward_events(app.clone(), &conn, Arc::clone(&state.terminals), generation);
 
     let watcher = Arc::clone(&conn);
     tauri::async_runtime::spawn(async move {
@@ -282,6 +342,75 @@ async fn stat(state: State<'_, AppState>, path: String) -> Result<StatOut, CmdEr
     }
 }
 
+/// Start a shell on a new terminal; its output streams to `output` as raw
+/// bytes. Returns the terminal's id.
+#[tauri::command]
+async fn pty_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cols: u16,
+    rows: u16,
+    cwd: Option<String>,
+    output: Channel<InvokeResponseBody>,
+) -> Result<u64, CmdError> {
+    let pty = match state
+        .current()?
+        .call(Op::PtyOpen { cols, rows, cwd })
+        .await?
+    {
+        Reply::Pty { pty } => pty,
+        other => return Err(unexpected(other)),
+    };
+    let mut t = state.terminals.lock().unwrap();
+    for data in t.early_output.remove(&pty).unwrap_or_default() {
+        let _ = output.send(InvokeResponseBody::Raw(data));
+    }
+    match t.early_exit.remove(&pty) {
+        Some(code) => {
+            let _ = app.emit("pty-exit", PtyExitEvent { pty, code });
+        }
+        None => {
+            t.channels.insert(pty, output);
+        }
+    }
+    Ok(pty)
+}
+
+/// Keystrokes. Not async, so calls run one after another in the order the UI
+/// made them, and nothing waits for the remote to answer.
+#[tauri::command]
+fn pty_write(state: State<'_, AppState>, pty: u64, data: String) -> Result<(), CmdError> {
+    let data = data.into_bytes();
+    Ok(state.current()?.send(Op::PtyInput { pty, data })?)
+}
+
+/// The UI has drawn `bytes` more output; lets the agent send more.
+#[tauri::command]
+fn pty_ack(state: State<'_, AppState>, pty: u64, bytes: u64) -> Result<(), CmdError> {
+    Ok(state.current()?.send(Op::PtyAck { pty, bytes })?)
+}
+
+#[tauri::command]
+async fn pty_resize(
+    state: State<'_, AppState>,
+    pty: u64,
+    cols: u16,
+    rows: u16,
+) -> Result<(), CmdError> {
+    state
+        .current()?
+        .call(Op::PtyResize { pty, cols, rows })
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn pty_close(state: State<'_, AppState>, pty: u64) -> Result<(), CmdError> {
+    state.terminals.lock().unwrap().channels.remove(&pty);
+    state.current()?.call(Op::PtyClose { pty }).await?;
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct WrittenOut {
     hash: String,
@@ -323,7 +452,8 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
-            connect, disconnect, list_dir, read_file, read_bytes, stat, write_file
+            connect, disconnect, list_dir, read_file, read_bytes, stat, write_file, pty_open,
+            pty_write, pty_ack, pty_resize, pty_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running Yonder");

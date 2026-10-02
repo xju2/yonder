@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use yonder_client::{connect, ConnectOptions, Level, LogFn, LogLine};
-use yonder_proto::{ErrorKind, Op, Reply};
+use yonder_proto::{ErrorKind, Event, Op, Reply};
 
 struct Fixture {
     root: tempfile::TempDir,
@@ -30,7 +30,7 @@ impl Fixture {
             &fake_ssh,
             format!(
                 "#!/bin/sh\n# Drop the options and host; run the command the way sshd would.\n\
-                 for last; do :; done\nexport HOME='{}'\nprintf '{rc_noise}'\nexec sh -c \"$last\"\n",
+                 for last; do :; done\nexport HOME='{}' SHELL=/bin/sh\nprintf '{rc_noise}'\nexec sh -c \"$last\"\n",
                 home.display()
             ),
         )
@@ -196,4 +196,188 @@ async fn reports_failed_install() {
     let err = connect(&fx.options(), sink).await.err().unwrap();
     assert!(err.step.starts_with("Installing agent"), "{err}");
     assert!(err.message.contains("installing the agent failed"), "{err}");
+}
+
+/// Collect terminal output until it contains `want`, or fail after a while.
+async fn output_until(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+    pty: u64,
+    want: &str,
+) -> String {
+    let mut seen = String::new();
+    let wait = async {
+        while let Some(e) = events.recv().await {
+            if let Event::PtyOutput { pty: p, data } = e {
+                assert_eq!(p, pty);
+                seen.push_str(&String::from_utf8_lossy(&data));
+                if seen.contains(want) {
+                    return;
+                }
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), wait)
+        .await
+        .unwrap_or_else(|_| panic!("no {want:?} in terminal output: {seen:?}"));
+    seen
+}
+
+#[tokio::test]
+async fn terminal_runs_commands_in_order() {
+    let fx = Fixture::new("");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+    let mut events = conn.take_events().unwrap();
+    assert!(conn.take_events().is_none());
+
+    let cwd = fx.home().join("work");
+    std::fs::create_dir(&cwd).unwrap();
+    let open = Op::PtyOpen {
+        cols: 80,
+        rows: 24,
+        cwd: Some(cwd.to_string_lossy().into()),
+    };
+    let Ok(Reply::Pty { pty }) = conn.call(open).await else {
+        panic!("no terminal")
+    };
+
+    // One keystroke per request, the way typing arrives.
+    for b in "echo \"$((6*7)) in $(pwd)\"\n".bytes() {
+        conn.send(Op::PtyInput { pty, data: vec![b] }).unwrap();
+    }
+    let out = output_until(&mut events, pty, "42 in ").await;
+    assert!(out.contains(&format!("42 in {}", cwd.display())), "{out:?}");
+
+    let resize = Op::PtyResize {
+        pty,
+        cols: 132,
+        rows: 40,
+    };
+    assert_eq!(conn.call(resize).await.unwrap(), Reply::Done);
+    conn.send(Op::PtyInput {
+        pty,
+        data: b"stty size\n".to_vec(),
+    })
+    .unwrap();
+    output_until(&mut events, pty, "40 132").await;
+
+    conn.send(Op::PtyInput {
+        pty,
+        data: b"exit 3\n".to_vec(),
+    })
+    .unwrap();
+    let exit = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Some(Event::PtyExit { pty: p, code }) = events.recv().await {
+                return (p, code);
+            }
+        }
+    })
+    .await
+    .expect("no exit event");
+    assert_eq!(exit, (pty, Some(3)));
+
+    let input = Op::PtyInput {
+        pty,
+        data: b"x".to_vec(),
+    };
+    assert_eq!(
+        conn.call(input).await.unwrap_err().kind,
+        ErrorKind::NotFound
+    );
+}
+
+#[tokio::test]
+async fn closing_a_terminal_hangs_it_up() {
+    let fx = Fixture::new("");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+    let mut events = conn.take_events().unwrap();
+    let open = Op::PtyOpen {
+        cols: 80,
+        rows: 24,
+        cwd: None,
+    };
+    let Ok(Reply::Pty { pty }) = conn.call(open).await else {
+        panic!("no terminal")
+    };
+    conn.send(Op::PtyInput {
+        pty,
+        data: b"echo ready\n".to_vec(),
+    })
+    .unwrap();
+    output_until(&mut events, pty, "ready").await;
+
+    assert_eq!(conn.call(Op::PtyClose { pty }).await.unwrap(), Reply::Done);
+    let exited = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let Some(Event::PtyExit { pty: p, .. }) = events.recv().await {
+                return p;
+            }
+        }
+    })
+    .await
+    .expect("closing did not end the shell");
+    assert_eq!(exited, pty);
+}
+
+#[tokio::test]
+async fn terminal_output_waits_for_acknowledgement() {
+    let fx = Fixture::new("");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+    let mut events = conn.take_events().unwrap();
+    let open = Op::PtyOpen {
+        cols: 80,
+        rows: 24,
+        cwd: None,
+    };
+    let Ok(Reply::Pty { pty }) = conn.call(open).await else {
+        panic!("no terminal")
+    };
+    // An endless writer, like `yes` or `cat` of a huge log.
+    conn.send(Op::PtyInput {
+        pty,
+        data: b"yes\n".to_vec(),
+    })
+    .unwrap();
+
+    // Without acknowledgements, output stops a little past the 1 MiB window.
+    let mut received = 0u64;
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), events.recv()).await {
+            Ok(Some(Event::PtyOutput { data, .. })) => received += data.len() as u64,
+            Ok(_) => panic!("terminal ended"),
+            Err(_) => break, // quiet: the agent stopped reading
+        }
+    }
+    assert!(
+        received > (1 << 20) && received < (2 << 20),
+        "received {received} bytes"
+    );
+
+    // Acknowledging lets more through.
+    conn.send(Op::PtyAck {
+        pty,
+        bytes: received,
+    })
+    .unwrap();
+    let more = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv()).await;
+    assert!(matches!(more, Ok(Some(Event::PtyOutput { .. }))));
+
+    // Ctrl-C still reaches the program, and closing ends the terminal.
+    conn.send(Op::PtyInput { pty, data: vec![3] }).unwrap();
+    assert_eq!(conn.call(Op::PtyClose { pty }).await.unwrap(), Reply::Done);
+    let exited = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Some(Event::PtyExit { pty: p, .. }) => return p,
+                Some(_) => {}
+                None => panic!("events ended"),
+            }
+        }
+    })
+    .await
+    .expect("terminal did not exit");
+    assert_eq!(exited, pty);
 }
