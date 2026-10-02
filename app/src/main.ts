@@ -227,7 +227,13 @@ const pathMenu = (path: string, reload: (() => void) | null = null) =>
     ],
   }).then((m) => m.popup());
 
-const tree = new FileTree($("tree"), (path) => void editors.open(path), (path) => pathMenu(path));
+const refreshTree = () => {
+  void tree.refresh();
+  void git.refreshChanges();
+};
+const tree = new FileTree($("tree"), (path) => void editors.open(path), (path) =>
+  pathMenu(path, refreshTree),
+);
 const editors = new Editors(
   $("editor"),
   $("viewer"),
@@ -341,10 +347,7 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
-$("refresh-tree").addEventListener("click", () => {
-  void tree.refresh();
-  void git.refreshChanges();
-});
+$("refresh-tree").addEventListener("click", refreshTree);
 
 // Refreshing on focus catches files written by batch jobs or other machines,
 // which file-change notifications miss on network filesystems.
