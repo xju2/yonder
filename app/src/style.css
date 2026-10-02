@@ -293,7 +293,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   background-clip: content-box;
   padding: 1.5px 0;
 }
-#panel-sash:hover { background-color: var(--accent); }
+#panel-sash:hover, #panel-sash:focus-visible { background-color: var(--accent); outline: none; }
 #terminal-panel {
   flex: none;
   height: var(--panel-height, 280px);

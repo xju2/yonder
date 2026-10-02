@@ -342,17 +342,25 @@ async fn stat(state: State<'_, AppState>, path: String) -> Result<StatOut, CmdEr
     }
 }
 
+#[derive(Serialize)]
+struct PtyOpened {
+    pty: u64,
+    /// Set if the shell already exited, e.g. a login file that runs `exit`.
+    /// Its `pty-exit` event went out before the UI knew this id.
+    exited: bool,
+    code: Option<i32>,
+}
+
 /// Start a shell on a new terminal; its output streams to `output` as raw
-/// bytes. Returns the terminal's id.
+/// bytes.
 #[tauri::command]
 async fn pty_open(
-    app: AppHandle,
     state: State<'_, AppState>,
     cols: u16,
     rows: u16,
     cwd: Option<String>,
     output: Channel<InvokeResponseBody>,
-) -> Result<u64, CmdError> {
+) -> Result<PtyOpened, CmdError> {
     let pty = match state
         .current()?
         .call(Op::PtyOpen { cols, rows, cwd })
@@ -365,15 +373,15 @@ async fn pty_open(
     for data in t.early_output.remove(&pty).unwrap_or_default() {
         let _ = output.send(InvokeResponseBody::Raw(data));
     }
-    match t.early_exit.remove(&pty) {
-        Some(code) => {
-            let _ = app.emit("pty-exit", PtyExitEvent { pty, code });
-        }
-        None => {
-            t.channels.insert(pty, output);
-        }
+    let early_exit = t.early_exit.remove(&pty);
+    if early_exit.is_none() {
+        t.channels.insert(pty, output);
     }
-    Ok(pty)
+    Ok(PtyOpened {
+        pty,
+        exited: early_exit.is_some(),
+        code: early_exit.flatten(),
+    })
 }
 
 /// Keystrokes. Not async, so calls run one after another in the order the UI
@@ -406,7 +414,12 @@ async fn pty_resize(
 
 #[tauri::command]
 async fn pty_close(state: State<'_, AppState>, pty: u64) -> Result<(), CmdError> {
-    state.terminals.lock().unwrap().channels.remove(&pty);
+    {
+        let mut t = state.terminals.lock().unwrap();
+        t.channels.remove(&pty);
+        t.early_output.remove(&pty);
+        t.early_exit.remove(&pty);
+    }
     state.current()?.call(Op::PtyClose { pty }).await?;
     Ok(())
 }

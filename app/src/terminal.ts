@@ -38,6 +38,8 @@ interface Term {
   /** Bytes drawn but not yet acknowledged to the remote. */
   unacked: number;
   ackTimer: number;
+  /** The tab was closed; its xterm is disposed. */
+  closed: boolean;
 }
 
 export class TerminalPanel {
@@ -114,6 +116,7 @@ export class TerminalPanel {
       tab: this.buildTab(),
       unacked: 0,
       ackTimer: 0,
+      closed: false,
     };
     this.terms.push(t);
     this.select(t);
@@ -123,22 +126,35 @@ export class TerminalPanel {
     const output = new Channel<ArrayBuffer>();
     // Acknowledge output once xterm has drawn it: the remote pauses a
     // program that gets too far ahead, as a local terminal would.
-    output.onmessage = (bytes) =>
-      term.write(new Uint8Array(bytes), () => this.drawn(t, bytes.byteLength));
+    output.onmessage = (bytes) => {
+      if (!t.closed) term.write(new Uint8Array(bytes), () => this.drawn(t, bytes.byteLength));
+    };
     const cols = term.cols;
     const rows = term.rows;
+    let opened: api.PtyOpened;
     try {
-      const pty = await api.ptyOpen(cols, rows, this.cwd(), output);
-      t.pty = pty;
-      t.alive = true;
-      this.byPty.set(pty, t);
-      this.flushAck(t);
+      opened = await api.ptyOpen(cols, rows, this.cwd(), output);
     } catch (e) {
+      if (t.closed) return;
       const msg = api.asError(e).message;
       term.write(`\x1b[31mCould not start a terminal: ${msg}\x1b[0m\r\n`);
       this.markDead(t);
       return;
     }
+    t.pty = opened.pty;
+    if (t.closed) {
+      // Closed while the shell was starting: hang it up rather than leave
+      // it running on the remote.
+      if (!opened.exited) api.ptyClose(opened.pty).catch(() => {});
+      return;
+    }
+    if (opened.exited) {
+      this.showExit(t, opened.code);
+      return;
+    }
+    t.alive = true;
+    this.byPty.set(opened.pty, t);
+    this.flushAck(t);
     term.onData((data) => {
       if (t.alive && t.pty !== null) api.ptyWrite(t.pty, data).catch(() => this.markDead(t));
     });
@@ -196,6 +212,8 @@ export class TerminalPanel {
   }
 
   private close(t: Term) {
+    t.closed = true;
+    clearTimeout(t.ackTimer);
     if (t.alive && t.pty !== null) api.ptyClose(t.pty).catch(() => {});
     if (t.pty !== null) this.byPty.delete(t.pty);
     const i = this.terms.indexOf(t);
@@ -215,6 +233,10 @@ export class TerminalPanel {
     const t = this.byPty.get(pty);
     if (!t) return;
     this.byPty.delete(pty);
+    this.showExit(t, code);
+  }
+
+  private showExit(t: Term, code: number | null) {
     const how = code === null ? "" : ` with code ${code}`;
     t.term.write(`\r\n\x1b[2m[process exited${how}]\x1b[0m\r\n`);
     this.markDead(t);

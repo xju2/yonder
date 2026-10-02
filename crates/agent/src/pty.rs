@@ -148,9 +148,10 @@ impl Ptys {
                 Ok(())
             });
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| Error::new(Error::from(e).kind, format!("could not start {shell}")))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            let message = format!("could not start {shell}: {e}");
+            Error::new(Error::from(e).kind, message)
+        })?;
         // Drop our copies of the slave side, or the reader never sees the end.
         drop(cmd);
 
@@ -226,11 +227,16 @@ fn open_pty(cols: u16, rows: u16) -> io::Result<(File, OwnedFd)> {
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }
-    // Neither descriptor may leak into the shell or into later terminals.
-    for fd in [master, slave] {
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    // Owned first, so an error below still closes both.
+    let (master, slave) = unsafe { (File::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    // Neither descriptor may leak into the shell or into later terminals:
+    // a stray copy keeps a terminal open after its shell has gone.
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
     }
-    Ok(unsafe { (File::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
+    Ok((master, slave))
 }
 
 fn winsize(cols: u16, rows: u16) -> libc::winsize {

@@ -87,13 +87,20 @@ export const onClosed = (f: (e: ClosedEvent) => void): Promise<UnlistenFn> =>
 
 // ---- terminals
 
+export interface PtyOpened {
+  pty: number;
+  /** The shell exited before this call returned (no pty-exit event follows). */
+  exited: boolean;
+  code: number | null;
+}
+
 /** Start the remote login shell; its output streams to `output`. */
 export const ptyOpen = (
   cols: number,
   rows: number,
   cwd: string | null,
   output: Channel<ArrayBuffer>,
-) => invoke<number>("pty_open", { cols, rows, cwd, output });
+) => invoke<PtyOpened>("pty_open", { cols, rows, cwd, output });
 /** Keystrokes. Calls reach the shell in the order they are made. */
 export const ptyWrite = (pty: number, data: string) => invoke<void>("pty_write", { pty, data });
 /** The terminal has drawn `bytes` more output, so the remote may send more. */

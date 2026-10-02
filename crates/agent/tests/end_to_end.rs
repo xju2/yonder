@@ -215,6 +215,7 @@ async fn output_until(
                 }
             }
         }
+        panic!("events ended before {want:?} appeared in: {seen:?}");
     };
     tokio::time::timeout(std::time::Duration::from_secs(10), wait)
         .await

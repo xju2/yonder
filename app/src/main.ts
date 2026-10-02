@@ -226,17 +226,35 @@ window.addEventListener("focus", () => {
 // ---- terminal panel height
 
 const panelSash = $("panel-sash");
+const panelBounds = () => {
+  const main = $("main").getBoundingClientRect();
+  return { main, min: 80, max: main.height - 120 };
+};
+const setPanelHeight = (h: number) => {
+  const { min, max } = panelBounds();
+  const clamped = Math.round(Math.min(Math.max(h, min), max));
+  document.documentElement.style.setProperty("--panel-height", `${clamped}px`);
+  panelSash.setAttribute("aria-valuenow", String(clamped));
+};
+panelSash.tabIndex = 0;
+panelSash.setAttribute("role", "separator");
+panelSash.setAttribute("aria-orientation", "horizontal");
+panelSash.setAttribute("aria-label", "Terminal panel height");
 panelSash.addEventListener("pointerdown", (e) => {
   panelSash.setPointerCapture(e.pointerId);
-  const main = $("main").getBoundingClientRect();
-  const move = (ev: PointerEvent) => {
-    const h = Math.min(Math.max(main.bottom - ev.clientY, 80), main.height - 120);
-    document.documentElement.style.setProperty("--panel-height", `${h}px`);
-  };
+  const { main } = panelBounds();
+  const move = (ev: PointerEvent) => setPanelHeight(main.bottom - ev.clientY);
   panelSash.addEventListener("pointermove", move);
   panelSash.addEventListener("pointerup", () => panelSash.removeEventListener("pointermove", move), {
     once: true,
   });
+});
+// Arrow keys move the divider too, 20 px a press.
+panelSash.addEventListener("keydown", (e) => {
+  const step = e.key === "ArrowUp" ? 20 : e.key === "ArrowDown" ? -20 : 0;
+  if (!step) return;
+  e.preventDefault();
+  setPanelHeight($("terminal-panel").getBoundingClientRect().height + step);
 });
 
 // ---- sidebar width
