@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
 import { ask } from "./modal";
+import { TerminalPanel } from "./terminal";
 import { FileTree } from "./tree";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -88,6 +89,7 @@ void api.onLog((e) => {
 void api.onClosed((e) => {
   if (!conn || e.generation !== conn.generation) return;
   statusConn.classList.add("down");
+  terminals.disconnected();
   showBanner(`Disconnected from ${conn.host}: ${e.reason}. Your open files and edits are kept.`);
 });
 
@@ -113,6 +115,30 @@ const editors = new Editors(
   (msg) => status(msg),
   (path) => tree.setActive(path),
   (pos) => ($("status-pos").textContent = pos),
+);
+const terminals = new TerminalPanel(
+  $("terminal-panel"),
+  $("panel-sash"),
+  $("term-tabs"),
+  $("term-body"),
+  () => conn?.root ?? null,
+);
+
+$("toggle-terminal").addEventListener("click", () => terminals.toggle());
+$("term-new").addEventListener("click", () => void terminals.create());
+$("term-hide").addEventListener("click", () => terminals.hide());
+// Ctrl+` shows and hides terminals, as in most editors. Caught before the
+// editor or a terminal sees it.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.ctrlKey && e.key === "`" && conn && !workspace.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      terminals.toggle();
+    }
+  },
+  true,
 );
 
 async function startSession(info: api.ConnInfo) {
@@ -195,6 +221,40 @@ window.addEventListener("focus", () => {
   if (!conn || workspace.hidden) return;
   void tree.refresh();
   editors.refreshActive();
+});
+
+// ---- terminal panel height
+
+const panelSash = $("panel-sash");
+const panelBounds = () => {
+  const main = $("main").getBoundingClientRect();
+  return { main, min: 80, max: main.height - 120 };
+};
+const setPanelHeight = (h: number) => {
+  const { min, max } = panelBounds();
+  const clamped = Math.round(Math.min(Math.max(h, min), max));
+  document.documentElement.style.setProperty("--panel-height", `${clamped}px`);
+  panelSash.setAttribute("aria-valuenow", String(clamped));
+};
+panelSash.tabIndex = 0;
+panelSash.setAttribute("role", "separator");
+panelSash.setAttribute("aria-orientation", "horizontal");
+panelSash.setAttribute("aria-label", "Terminal panel height");
+panelSash.addEventListener("pointerdown", (e) => {
+  panelSash.setPointerCapture(e.pointerId);
+  const { main } = panelBounds();
+  const move = (ev: PointerEvent) => setPanelHeight(main.bottom - ev.clientY);
+  panelSash.addEventListener("pointermove", move);
+  panelSash.addEventListener("pointerup", () => panelSash.removeEventListener("pointermove", move), {
+    once: true,
+  });
+});
+// Arrow keys move the divider too, 20 px a press.
+panelSash.addEventListener("keydown", (e) => {
+  const step = e.key === "ArrowUp" ? 20 : e.key === "ArrowDown" ? -20 : 0;
+  if (!step) return;
+  e.preventDefault();
+  setPanelHeight($("terminal-panel").getBoundingClientRect().height + step);
 });
 
 // ---- sidebar width

@@ -6,7 +6,7 @@ Typing never waits on the network: files are edited locally and only saving
 goes to the remote. Nothing is left running, locked, or half-installed on the
 remote, and when a connection fails Yonder tells you which step failed and why.
 
-**Status:** connect, browse, edit and save; view images and PDFs. See the
+**Status:** connect, browse, edit and save; view images and PDFs; terminals. See the
 [roadmap](#roadmap).
 
 ## Using it
@@ -32,6 +32,11 @@ ssh -o BatchMode=yes <host> true
 - **Images and PDFs** (PNG, JPEG, GIF, WebP, SVG, PDF, …) open in a viewer.
   When you come back to the window, or press ↻, a file that changed on the
   remote (a regenerated plot, say) is reloaded, keeping zoom and position.
+- **Terminal:** <kbd>Ctrl</kbd>+<kbd>`</kbd> or the Terminal button opens your
+  login shell on the remote, in the open folder; + adds more. A program that
+  prints endlessly is paused rather than flooding the window, so
+  <kbd>Ctrl</kbd>+<kbd>C</kbd> always answers at once. Terminals end with the
+  connection; use `tmux` inside one if a session must survive.
 - **Lost connection:** open files and unsaved edits stay; press Reconnect.
 
 ## How it works
@@ -40,7 +45,7 @@ ssh -o BatchMode=yes <host> true
  your Mac                                       remote (Linux)
 ┌──────────────────────────────────┐   ssh    ┌──────────────────────────────┐
 │ Yonder.app (Tauri)               │  stdio   │ yonder-agent (static binary) │
-│  ├ UI: TypeScript + Monaco       │◄────────►│  file operations             │
+│  ├ UI: TypeScript + Monaco       │◄────────►│  files and terminals         │
 │  └ Rust: runs ssh, routes msgs   │ msgpack  │  exits when ssh closes       │
 └──────────────────────────────────┘  frames  └──────────────────────────────┘
 ```
@@ -48,7 +53,7 @@ ssh -o BatchMode=yes <host> true
 Connecting runs `ssh <host>` once. A one-line `sh` script on the remote
 reports the CPU type, then either starts the agent cached in
 `~/.cache/yonder/agent-<hash>` or receives it over the same session (about
-700 KB, once per Yonder version) and installs it with an atomic rename. There
+1 MB, once per Yonder version) and installs it with an atomic rename. There
 is no daemon and no lock file.
 
 Saving writes a temporary file next to the original and renames it into
@@ -59,10 +64,10 @@ ownership survive.
 | Path | What |
 |---|---|
 | `crates/proto` | Messages and framing shared by both sides |
-| `crates/agent` | `yonder-agent`, the remote side |
+| `crates/agent` | `yonder-agent`, the remote side: files, and shells on pseudo-terminals |
 | `crates/client` | Starts the agent over ssh; request routing |
 | `app/src-tauri` | Desktop process: Tauri commands over the client |
-| `app/src` | UI: file tree, tabs, Monaco editor, image and PDF viewers ([pdf.js](https://mozilla.github.io/pdf.js/)) |
+| `app/src` | UI: file tree, tabs, Monaco editor, image and PDF viewers ([pdf.js](https://mozilla.github.io/pdf.js/)), terminals ([xterm.js](https://xtermjs.org/)) |
 
 ## Building
 
@@ -108,8 +113,8 @@ agent through a stand-in for `ssh`.
 ## Roadmap
 
 1. **Connect and edit** — done.
-2. **Watching and terminal:** periodic re-listing of open folders and open
-   files; terminal tabs.
+2. **Watching and terminal:** terminal tabs are done; periodic re-listing of
+   open folders and open files is next.
 3. **Git and viewers:** changed files with diffs, commit history. Image and
    PDF viewers are done.
 4. **Hardening:** automatic reconnect, password and MFA prompts, large-file

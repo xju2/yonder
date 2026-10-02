@@ -1,6 +1,6 @@
 // Typed wrappers around the Tauri commands in src-tauri/src/main.rs.
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface ConnInfo {
@@ -84,3 +84,35 @@ export const onLog = (f: (e: LogEvent) => void): Promise<UnlistenFn> =>
   listen<LogEvent>("conn-log", (e) => f(e.payload));
 export const onClosed = (f: (e: ClosedEvent) => void): Promise<UnlistenFn> =>
   listen<ClosedEvent>("conn-closed", (e) => f(e.payload));
+
+// ---- terminals
+
+export interface PtyOpened {
+  pty: number;
+  /** The shell exited before this call returned (no pty-exit event follows). */
+  exited: boolean;
+  code: number | null;
+}
+
+/** Start the remote login shell; its output streams to `output`. */
+export const ptyOpen = (
+  cols: number,
+  rows: number,
+  cwd: string | null,
+  output: Channel<ArrayBuffer>,
+) => invoke<PtyOpened>("pty_open", { cols, rows, cwd, output });
+/** Keystrokes. Calls reach the shell in the order they are made. */
+export const ptyWrite = (pty: number, data: string) => invoke<void>("pty_write", { pty, data });
+/** The terminal has drawn `bytes` more output, so the remote may send more. */
+export const ptyAck = (pty: number, bytes: number) => invoke<void>("pty_ack", { pty, bytes });
+export const ptyResize = (pty: number, cols: number, rows: number) =>
+  invoke<void>("pty_resize", { pty, cols, rows });
+export const ptyClose = (pty: number) => invoke<void>("pty_close", { pty });
+
+export interface PtyExitEvent {
+  pty: number;
+  /** null when a signal ended the shell. */
+  code: number | null;
+}
+export const onPtyExit = (f: (e: PtyExitEvent) => void): Promise<UnlistenFn> =>
+  listen<PtyExitEvent>("pty-exit", (e) => f(e.payload));
