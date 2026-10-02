@@ -445,7 +445,6 @@ export class Editors {
     tab.model?.dispose();
     tab.viewer?.dispose();
     this.dropDiff(tab);
-    this.reportUnsaved();
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
   }
 
@@ -475,22 +474,9 @@ export class Editors {
     this.tabsEl.append(tab.el);
   }
 
-  /** Told whenever "some tab has unsaved edits" turns true or false. */
-  onUnsavedChange: (unsaved: boolean) => void = () => {};
-  private lastUnsaved = false;
-
   private paintTab(tab: Tab) {
     tab.el.classList.toggle("dirty", this.isDirty(tab));
     tab.el.classList.toggle("active", tab === this.active);
-    this.reportUnsaved();
-  }
-
-  private reportUnsaved() {
-    const unsaved = this.hasUnsaved();
-    if (unsaved !== this.lastUnsaved) {
-      this.lastUnsaved = unsaved;
-      this.onUnsavedChange(unsaved);
-    }
   }
 
   private show(tab: Tab | null) {

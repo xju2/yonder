@@ -118,7 +118,11 @@ void api.onClosed((e) => {
 
 /** Seconds between attempts; the last repeats. */
 const RETRY_DELAYS = [1, 2, 5, 10, 20, 30];
-const retry = { attempt: 0, timer: 0, tick: 0, busy: false };
+const retry = { attempt: 0, timer: 0, tick: 0 };
+
+/** One connection attempt at a time: a second would share its password
+ * prompts, and whichever finished last would win. */
+let connecting = false;
 
 function stopRetrying() {
   clearTimeout(retry.timer);
@@ -164,9 +168,9 @@ function needsPerson(e: api.CmdError) {
 }
 
 async function reconnectNow() {
-  if (retry.busy) return;
+  if (connecting) return;
   stopRetrying();
-  retry.busy = true;
+  connecting = true;
   showBanner(`Reconnecting to ${target.host}…`, null);
   try {
     const oldRoot = conn?.root;
@@ -186,7 +190,7 @@ async function reconnectNow() {
       scheduleReconnect(ce.message);
     }
   } finally {
-    retry.busy = false;
+    connecting = false;
   }
 }
 
@@ -257,6 +261,8 @@ async function startSession(info: api.ConnInfo) {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (connecting) return;
+  connecting = true;
   target = { host: hostInput.value.trim(), folder: folderInput.value.trim() };
   connectLog.replaceChildren();
   connectError.hidden = true;
@@ -281,6 +287,7 @@ form.addEventListener("submit", async (e) => {
     }
     connectError.hidden = false;
   } finally {
+    connecting = false;
     connectBtn.disabled = false;
     connectBtn.textContent = "Connect";
   }
@@ -385,14 +392,11 @@ sash.addEventListener("pointerdown", (e) => {
   });
 });
 
-// ---- closing the window with unsaved edits
-
 // ---- quitting or closing with unsaved edits
-
-editors.onUnsavedChange = (unsaved) => void api.setUnsaved(unsaved).catch(() => {});
 
 let askingToQuit = false;
 async function confirmQuit() {
+  if (!editors.hasUnsaved()) return api.quitApp();
   // Cmd+Q pressed twice should not stack two questions.
   if (askingToQuit) return;
   askingToQuit = true;
@@ -404,6 +408,8 @@ async function confirmQuit() {
   if (choice === "quit") await api.quitApp();
 }
 
+// Every quit (Cmd+Q, the Dock) is held until this answers, so the check
+// uses the editor's state at that moment.
 void api.onQuitRequested(() => void confirmQuit());
 
 void getCurrentWindow().onCloseRequested(async (event) => {

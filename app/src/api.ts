@@ -162,7 +162,6 @@ export const gitDiff = (repo: string, path: string, oldPath: string | null, rev:
 // ---- quitting
 
 /** Whether any tab has unsaved edits, so quitting knows to ask first. */
-export const setUnsaved = (unsaved: boolean) => invoke<void>("set_unsaved", { unsaved });
 /** Quit without further questions. */
 export const quitApp = () => invoke<void>("quit_app");
 /** Cmd+Q or the Dock asked to quit while edits are unsaved. */

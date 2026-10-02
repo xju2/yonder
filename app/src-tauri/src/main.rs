@@ -31,8 +31,9 @@ struct AppState {
     /// from one it already replaced.
     generation: AtomicU64,
     terminals: Arc<Mutex<Terminals>>,
-    /// The UI has unsaved edits; quitting must ask first.
-    unsaved: AtomicBool,
+    /// Held for a whole connection attempt, so password prompts and their
+    /// cancellation belong to one attempt at a time.
+    connecting: tokio::sync::Mutex<()>,
     /// Lets ssh ask for passwords and one-time codes through the window.
     askpass: Mutex<Option<(askpass::Server, Askpass)>>,
     /// Questions from ssh waiting for the person's answer, by id.
@@ -191,6 +192,7 @@ async fn connect(
     host: String,
     path: String,
 ) -> Result<ConnInfo, CmdError> {
+    let _attempt = state.connecting.lock().await;
     if let Some(old) = state.conn.lock().unwrap().take() {
         old.close();
     }
@@ -648,30 +650,26 @@ fn askpass_answer(state: State<'_, AppState>, id: u64, answer: Option<String>) {
 
 // ---- quitting with unsaved edits
 
-/// The UI reports whether any tab has unsaved edits.
-#[tauri::command]
-fn set_unsaved(state: State<'_, AppState>, unsaved: bool) {
-    state.unsaved.store(unsaved, Ordering::Relaxed);
-}
-
-/// Quit now: the person already decided about unsaved edits.
+/// Quit now: the UI found no unsaved edits, or the person chose to discard
+/// them.
 #[tauri::command]
 fn quit_app(app: AppHandle, state: State<'_, AppState>) {
-    state.unsaved.store(false, Ordering::Relaxed);
     if let Some(conn) = state.conn.lock().unwrap().take() {
         conn.close();
     }
     app.exit(0);
 }
 
-/// Quit, or with unsaved edits ask the UI to confirm first.
+/// Whether a quit may go ahead now. While a window is open, the UI decides:
+/// it checks for unsaved edits at that moment, asks if there are any, and
+/// calls `quit_app`. A copy of that state kept here could be stale.
 fn request_quit(app: &AppHandle) -> bool {
-    if app.state::<AppState>().unsaved.load(Ordering::Relaxed) {
-        let _ = app.emit("quit-requested", ());
-        false
-    } else {
-        true
+    if app.webview_windows().is_empty() {
+        // The window already closed, after the UI's own check.
+        return true;
     }
+    let _ = app.emit("quit-requested", ());
+    false
 }
 
 /// The standard macOS menus, except that Quit goes through `request_quit`.
@@ -737,7 +735,6 @@ fn main() {
             git_log,
             git_commit_files,
             git_diff,
-            set_unsaved,
             quit_app,
             askpass_answer
         ])
@@ -754,8 +751,8 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while starting Yonder")
         .run(|app, event| {
-            // Quitting from the Dock, or the last window closing: with
-            // unsaved edits, ask first. `code` is set when we exit on purpose.
+            // Quitting from the Dock, or the last window closing: the UI
+            // decides. `code` is set when we exit on purpose.
             if let RunEvent::ExitRequested {
                 api, code: None, ..
             } = event
