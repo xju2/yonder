@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -42,6 +42,11 @@ pub enum Op {
     /// Size and modification time, following symlinks. Lets viewers notice a
     /// regenerated plot without downloading it again.
     Stat {
+        path: String,
+    },
+    /// The target of a symbolic link, as stored in the link. Fails with
+    /// [`ErrorKind::Other`] if `path` is not a link.
+    ReadLink {
         path: String,
     },
     /// Fails with [`ErrorKind::TooLarge`] if the file exceeds `max_bytes`.
@@ -94,6 +99,14 @@ pub enum Op {
     PtyClose {
         pty: u64,
     },
+    /// Run `git` with `args` in `cwd`. Git is told not to take optional
+    /// locks or prompt, so looking never interferes with the user's own git
+    /// commands. Output beyond `max_bytes` is cut off.
+    Git {
+        cwd: String,
+        args: Vec<String>,
+        max_bytes: u64,
+    },
 }
 
 /// Agent -> app.
@@ -131,6 +144,15 @@ pub enum Reply {
         pty: u64,
     },
     Done,
+    /// What a command printed. `code` is `None` if a signal ended it.
+    Output {
+        code: Option<i32>,
+        #[serde(with = "serde_bytes")]
+        stdout: Vec<u8>,
+        stderr: String,
+        /// `stdout` hit the size limit and was cut off.
+        truncated: bool,
+    },
     File {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,

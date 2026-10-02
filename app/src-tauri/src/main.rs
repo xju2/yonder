@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody, Response};
 use tauri::{AppHandle, Emitter, Manager, State};
+use yonder_client::git::{self, Change, Commit, Status};
 use yonder_client::{connect as open_connection, ConnectOptions, Connection, Level, LogLine};
 use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Event, Op, Reply};
 
@@ -424,6 +425,122 @@ async fn pty_close(state: State<'_, AppState>, pty: u64) -> Result<(), CmdError>
     Ok(())
 }
 
+// ---- git (read-only)
+
+#[derive(Serialize)]
+struct GitStatusOut {
+    /// The repository's top folder; `None` if `dir` is not in a repository.
+    repo: Option<String>,
+    status: Option<Status>,
+}
+
+#[tauri::command]
+async fn git_status(state: State<'_, AppState>, dir: String) -> Result<GitStatusOut, CmdError> {
+    let conn = state.current()?;
+    let Some(repo) = git::repo_root(&conn, &dir).await? else {
+        return Ok(GitStatusOut {
+            repo: None,
+            status: None,
+        });
+    };
+    let status = git::status(&conn, &repo).await?;
+    Ok(GitStatusOut {
+        repo: Some(repo),
+        status: Some(status),
+    })
+}
+
+#[tauri::command]
+async fn git_log(
+    state: State<'_, AppState>,
+    repo: String,
+    skip: u32,
+    limit: u32,
+) -> Result<Vec<Commit>, CmdError> {
+    let conn = state.current()?;
+    Ok(git::log(&conn, &repo, skip, limit).await?)
+}
+
+#[tauri::command]
+async fn git_commit_files(
+    state: State<'_, AppState>,
+    repo: String,
+    hash: String,
+) -> Result<Vec<Change>, CmdError> {
+    let conn = state.current()?;
+    Ok(git::commit_files(&conn, &repo, &hash).await?)
+}
+
+#[derive(Serialize)]
+struct DiffOut {
+    /// Both sides as text; `None` when either side is not UTF-8 text.
+    original: Option<String>,
+    modified: Option<String>,
+}
+
+/// Both sides of one file's change. Without `rev`: the last commit against
+/// the working tree. With `rev`: that commit's parent against the commit.
+#[tauri::command]
+async fn git_diff(
+    state: State<'_, AppState>,
+    repo: String,
+    path: String,
+    old_path: Option<String>,
+    rev: Option<String>,
+) -> Result<DiffOut, CmdError> {
+    let conn = state.current()?;
+    let before = old_path.as_deref().unwrap_or(&path);
+    let (original, modified) = match &rev {
+        Some(rev) => {
+            let parent = format!("{rev}^");
+            (
+                git::file_at(&conn, &repo, &parent, before).await?,
+                git::file_at(&conn, &repo, rev, &path).await?,
+            )
+        }
+        None => {
+            let original = git::file_at(&conn, &repo, "HEAD", before).await?;
+            let full = format!("{}/{path}", repo.trim_end_matches('/'));
+            // Git stores a symbolic link as its target path, so compare the
+            // link itself, not the file it points to.
+            let modified = match conn.call(Op::ReadLink { path: full.clone() }).await {
+                Ok(Reply::Path { path: target, .. }) => Some(target.into_bytes()),
+                Err(e) if e.kind == ErrorKind::NotFound => None,
+                // Not a link: compare its contents.
+                Err(_) => {
+                    let op = Op::ReadFile {
+                        path: full,
+                        max_bytes: git::MAX_DIFF_FILE,
+                    };
+                    match conn.call(op).await {
+                        Ok(Reply::File { data, .. }) => Some(data),
+                        Err(e) if e.kind == ErrorKind::NotFound => None,
+                        Err(e) => return Err(e.into()),
+                        Ok(other) => return Err(unexpected(other)),
+                    }
+                }
+                Ok(other) => return Err(unexpected(other)),
+            };
+            (original, modified)
+        }
+    };
+    let text = |side: Option<Vec<u8>>| -> Option<String> {
+        let data = side.unwrap_or_default();
+        if data[..data.len().min(8192)].contains(&0) {
+            return None;
+        }
+        String::from_utf8(data).ok()
+    };
+    let (original, modified) = (text(original), text(modified));
+    if original.is_none() || modified.is_none() {
+        return Ok(DiffOut {
+            original: None,
+            modified: None,
+        });
+    }
+    Ok(DiffOut { original, modified })
+}
+
 #[derive(Serialize)]
 struct WrittenOut {
     hash: String,
@@ -465,8 +582,22 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
-            connect, disconnect, list_dir, read_file, read_bytes, stat, write_file, pty_open,
-            pty_write, pty_ack, pty_resize, pty_close
+            connect,
+            disconnect,
+            list_dir,
+            read_file,
+            read_bytes,
+            stat,
+            write_file,
+            pty_open,
+            pty_write,
+            pty_ack,
+            pty_resize,
+            pty_close,
+            git_status,
+            git_log,
+            git_commit_files,
+            git_diff
         ])
         .run(tauri::generate_context!())
         .expect("error while running Yonder");

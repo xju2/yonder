@@ -116,3 +116,45 @@ export interface PtyExitEvent {
 }
 export const onPtyExit = (f: (e: PtyExitEvent) => void): Promise<UnlistenFn> =>
   listen<PtyExitEvent>("pty-exit", (e) => f(e.payload));
+
+// ---- git (read-only)
+
+export interface GitChange {
+  /** Relative to the repository root. */
+  path: string;
+  old_path: string | null;
+  /** M, A, D, R, C, U (conflict) or ? (untracked). */
+  status: string;
+}
+export interface GitStatus {
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: GitChange[];
+}
+export interface GitCommit {
+  hash: string;
+  short: string;
+  author: string;
+  /** Seconds since the epoch. */
+  time: number;
+  subject: string;
+  merge: boolean;
+}
+export interface GitDiff {
+  /** null when the file is not text on either side. */
+  original: string | null;
+  modified: string | null;
+}
+
+/** `repo` is null when `dir` is not inside a git repository. */
+export const gitStatus = (dir: string) =>
+  invoke<{ repo: string | null; status: GitStatus | null }>("git_status", { dir });
+export const gitLog = (repo: string, skip: number, limit: number) =>
+  invoke<GitCommit[]>("git_log", { repo, skip, limit });
+export const gitCommitFiles = (repo: string, hash: string) =>
+  invoke<GitChange[]>("git_commit_files", { repo, hash });
+/** Without `rev`: HEAD against the working tree. With it: that commit against its parent. */
+export const gitDiff = (repo: string, path: string, oldPath: string | null, rev: string | null) =>
+  invoke<GitDiff>("git_diff", { repo, path, oldPath, rev });
