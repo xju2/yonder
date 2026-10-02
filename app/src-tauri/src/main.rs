@@ -501,14 +501,24 @@ async fn git_diff(
         None => {
             let original = git::file_at(&conn, &repo, "HEAD", before).await?;
             let full = format!("{}/{path}", repo.trim_end_matches('/'));
-            let op = Op::ReadFile {
-                path: full,
-                max_bytes: git::MAX_DIFF_FILE,
-            };
-            let modified = match conn.call(op).await {
-                Ok(Reply::File { data, .. }) => Some(data),
+            // Git stores a symbolic link as its target path, so compare the
+            // link itself, not the file it points to.
+            let modified = match conn.call(Op::ReadLink { path: full.clone() }).await {
+                Ok(Reply::Path { path: target, .. }) => Some(target.into_bytes()),
                 Err(e) if e.kind == ErrorKind::NotFound => None,
-                Err(e) => return Err(e.into()),
+                // Not a link: compare its contents.
+                Err(_) => {
+                    let op = Op::ReadFile {
+                        path: full,
+                        max_bytes: git::MAX_DIFF_FILE,
+                    };
+                    match conn.call(op).await {
+                        Ok(Reply::File { data, .. }) => Some(data),
+                        Err(e) if e.kind == ErrorKind::NotFound => None,
+                        Err(e) => return Err(e.into()),
+                        Ok(other) => return Err(unexpected(other)),
+                    }
+                }
                 Ok(other) => return Err(unexpected(other)),
             };
             (original, modified)

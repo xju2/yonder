@@ -416,7 +416,10 @@ async fn git_status_history_and_contents() {
         && git add . && git commit -qm 'First commit'",
     );
     sh("git mv src/old.rs src/new.rs && printf 'one\\ntwo\\n' > a.txt && git commit -qam 'Second: rename'");
-    sh("printf 'one\\ntwo\\nthree\\n' > a.txt && printf 'x\\n' > untracked.txt");
+    sh(
+        "printf 'one\\ntwo\\nthree\\n' > a.txt && printf 'x\\n' > untracked.txt \
+        && mkdir -p newdir/deep && printf 'y\\n' > newdir/deep/file.txt",
+    );
 
     // Found from a subfolder too.
     let top = git::repo_root(&conn, &sub).await.unwrap().unwrap();
@@ -432,7 +435,15 @@ async fn git_status_history_and_contents() {
         .iter()
         .map(|c| (c.status, c.path.as_str()))
         .collect();
-    assert_eq!(files, vec![('M', "a.txt"), ('?', "untracked.txt")]);
+    // Untracked folders are listed file by file, so every row opens.
+    assert_eq!(
+        files,
+        vec![
+            ('M', "a.txt"),
+            ('?', "newdir/deep/file.txt"),
+            ('?', "untracked.txt")
+        ]
+    );
 
     let log = git::log(&conn, &top, 0, 10).await.unwrap();
     let subjects: Vec<_> = log.iter().map(|c| c.subject.as_str()).collect();
@@ -474,4 +485,24 @@ async fn git_status_history_and_contents() {
             .unwrap(),
         None
     );
+
+    // A symbolic link reads as its stored target, the way git stores it.
+    sh("ln -s a.txt link");
+    let link = Op::ReadLink {
+        path: format!("{root}/link"),
+    };
+    assert_eq!(
+        conn.call(link).await.unwrap(),
+        Reply::Path {
+            path: "a.txt".into(),
+            is_dir: false
+        }
+    );
+
+    // A committed file past the diff limit is reported as too large.
+    sh("head -c 17000000 /dev/zero > big.bin && git add big.bin && git commit -qm big");
+    let err = git::file_at(&conn, &top, "HEAD", "big.bin")
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::TooLarge, "{err}");
 }

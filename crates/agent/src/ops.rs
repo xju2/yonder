@@ -14,6 +14,10 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
         Op::Resolve { path } => resolve(&path),
         Op::ListDir { path } => list_dir(Path::new(&path)).map(Reply::Entries),
         Op::Stat { path } => Ok(Reply::Stat(stat_of(&fs::metadata(path)?))),
+        Op::ReadLink { path } => Ok(Reply::Path {
+            is_dir: false,
+            path: fs::read_link(path)?.to_string_lossy().into_owned(),
+        }),
         Op::ReadFile { path, max_bytes } => read_file(Path::new(&path), max_bytes),
         Op::WriteFile {
             path,
@@ -501,6 +505,27 @@ mod tests {
             (code.is_some(), out.as_slice(), truncated),
             (true, &b"git "[..], true)
         );
+    }
+
+    #[test]
+    fn read_link_returns_the_stored_target() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("data.txt"), "contents").unwrap();
+        symlink("data.txt", d.path().join("link")).unwrap();
+        let op = Op::ReadLink {
+            path: d.path().join("link").to_string_lossy().into(),
+        };
+        assert_eq!(
+            handle(op).unwrap(),
+            Reply::Path {
+                path: "data.txt".into(),
+                is_dir: false
+            }
+        );
+        let op = Op::ReadLink {
+            path: d.path().join("data.txt").to_string_lossy().into(),
+        };
+        assert_eq!(handle(op).unwrap_err().kind, ErrorKind::Other);
     }
 
     #[test]

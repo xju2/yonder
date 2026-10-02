@@ -44,6 +44,11 @@ pub enum Op {
     Stat {
         path: String,
     },
+    /// The target of a symbolic link, as stored in the link. Fails with
+    /// [`ErrorKind::Other`] if `path` is not a link.
+    ReadLink {
+        path: String,
+    },
     /// Fails with [`ErrorKind::TooLarge`] if the file exceeds `max_bytes`.
     ReadFile {
         path: String,

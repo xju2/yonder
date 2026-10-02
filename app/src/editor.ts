@@ -254,10 +254,7 @@ export class Editors {
     const lang = languageFor(req.path);
     const raced = this.tabs.find((t) => t.path === key);
     if (raced) {
-      if (raced.diff && d.original !== null && d.modified !== null) {
-        raced.diff.original.setValue(d.original);
-        raced.diff.modified.setValue(d.modified);
-      }
+      this.setDiff(raced, name, lang, d.original, d.modified);
       return this.show(raced);
     }
     const tab: Tab = {
@@ -274,18 +271,44 @@ export class Editors {
       diff: null,
       label: req.rev ? `${name} @ ${req.short}` : `${name} (changes)`,
     };
-    if (d.original === null || d.modified === null) {
-      tab.note = `${name} is not a text file, so there is no line-by-line comparison.`;
-    } else {
-      tab.diff = {
-        original: monaco.editor.createModel(d.original, lang),
-        modified: monaco.editor.createModel(d.modified, lang),
-      };
-    }
+    this.setDiff(tab, name, lang, d.original, d.modified);
     this.buildTab(tab);
     tab.el.title = req.oldPath ? `${req.oldPath} → ${req.path}` : req.path;
     this.tabs.push(tab);
     this.show(tab);
+  }
+
+  /** Give a diff tab new contents; either side null means not text. */
+  private setDiff(
+    tab: Tab,
+    name: string,
+    lang: string,
+    original: string | null,
+    modified: string | null,
+  ) {
+    if (original === null || modified === null) {
+      // Now binary: drop any text comparison shown before.
+      this.dropDiff(tab);
+      tab.note = `${name} is not a text file, so there is no line-by-line comparison.`;
+    } else if (tab.diff) {
+      tab.diff.original.setValue(original);
+      tab.diff.modified.setValue(modified);
+    } else {
+      tab.note = "";
+      tab.diff = {
+        original: monaco.editor.createModel(original, lang),
+        modified: monaco.editor.createModel(modified, lang),
+      };
+    }
+  }
+
+  private dropDiff(tab: Tab) {
+    if (!tab.diff) return;
+    // Detach before disposing, or the diff editor keeps dead models.
+    if (this.diffEditor?.getModel()?.original === tab.diff.original) this.diffEditor.setModel(null);
+    tab.diff.original.dispose();
+    tab.diff.modified.dispose();
+    tab.diff = null;
   }
 
   private getDiffEditor(): monaco.editor.IStandaloneDiffEditor {
@@ -421,12 +444,7 @@ export class Editors {
     tab.el.remove();
     tab.model?.dispose();
     tab.viewer?.dispose();
-    if (tab.diff) {
-      // Detach before disposing, or the diff editor keeps dead models.
-      if (this.diffEditor?.getModel()?.original === tab.diff.original) this.diffEditor.setModel(null);
-      tab.diff.original.dispose();
-      tab.diff.modified.dispose();
-    }
+    this.dropDiff(tab);
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
   }
 

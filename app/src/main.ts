@@ -243,6 +243,8 @@ async function showSideView(view: SideView) {
   sideView = view;
   for (const b of document.querySelectorAll<HTMLButtonElement>("#side-tabs button")) {
     b.setAttribute("aria-selected", String(b.dataset.view === view));
+    // Only the selected tab is in the Tab order; arrows move between tabs.
+    b.tabIndex = b.dataset.view === view ? 0 : -1;
   }
   $("files-view").hidden = view !== "files";
   $("changes-view").hidden = view !== "changes";
@@ -252,8 +254,17 @@ async function showSideView(view: SideView) {
   if (view === "history") await git.showHistory();
 }
 
-for (const b of document.querySelectorAll<HTMLButtonElement>("#side-tabs button")) {
+const sideTabs = [...document.querySelectorAll<HTMLButtonElement>("#side-tabs button")];
+for (const [i, b] of sideTabs.entries()) {
   b.addEventListener("click", () => void showSideView(b.dataset.view as SideView));
+  b.addEventListener("keydown", (e) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const next = sideTabs[(i + step + sideTabs.length) % sideTabs.length];
+    next.focus();
+    void showSideView(next.dataset.view as SideView);
+  });
 }
 
 // ---- terminal panel height

@@ -17,6 +17,8 @@ struct Output {
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
+    /// The output hit the limit; git was stopped part way.
+    truncated: bool,
 }
 
 async fn git(conn: &Connection, cwd: &str, args: &[&str], max: u64) -> Result<Output, Error> {
@@ -42,6 +44,7 @@ async fn git(conn: &Connection, cwd: &str, args: &[&str], max: u64) -> Result<Ou
                 code,
                 stdout,
                 stderr,
+                truncated,
             })
         }
         other => Err(Error::new(
@@ -112,7 +115,8 @@ pub async fn status(conn: &Connection, repo: &str) -> Result<Status, Error> {
             "--porcelain=v2",
             "-z",
             "--branch",
-            "--untracked-files=normal",
+            // Each untracked file, not just its folder, so every row opens.
+            "--untracked-files=all",
         ],
     )
     .await?;
@@ -324,7 +328,7 @@ pub async fn file_at(
 ) -> Result<Option<Vec<u8>>, Error> {
     let spec = format!("{rev}:{path}");
     let out = git(conn, repo, &["show", &spec], MAX_DIFF_FILE).await?;
-    if out.code == Some(0) && out.stdout.len() as u64 >= MAX_DIFF_FILE {
+    if out.truncated {
         return Err(Error::new(
             ErrorKind::TooLarge,
             "the file is too large to compare",

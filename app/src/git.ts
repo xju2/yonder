@@ -79,6 +79,10 @@ export class GitPanel {
   private loadedSkip = 0;
   private historyDone = false;
   private changesBusy: Promise<void> | null = null;
+  /** Bumped by reset(); results from older requests are dropped. */
+  private session = 0;
+  /** Bumped by each history reload; older pages are dropped. */
+  private historyRun = 0;
 
   constructor(
     private changesEl: HTMLElement,
@@ -90,6 +94,9 @@ export class GitPanel {
 
   /** Forget everything; called when the folder or connection changes. */
   reset() {
+    this.session++;
+    this.historyRun++;
+    this.changesBusy = null;
     this.repo = null;
     this.loadedSkip = 0;
     this.historyDone = false;
@@ -99,7 +106,12 @@ export class GitPanel {
 
   /** Re-run `git status`. Overlapping calls share one run. */
   refreshChanges(): Promise<void> {
-    this.changesBusy ??= this.loadChanges().finally(() => (this.changesBusy = null));
+    if (!this.changesBusy) {
+      const run: Promise<void> = this.loadChanges().finally(() => {
+        if (this.changesBusy === run) this.changesBusy = null;
+      });
+      this.changesBusy = run;
+    }
     return this.changesBusy;
   }
 
@@ -118,6 +130,7 @@ export class GitPanel {
   private async loadChanges() {
     const dir = this.dir();
     if (!dir) return;
+    const session = this.session;
     const body = el("div", "git-body");
     if (!this.changesEl.firstChild) {
       this.header(this.changesEl, "Changes", () => void this.refreshChanges());
@@ -127,10 +140,13 @@ export class GitPanel {
     try {
       result = await api.gitStatus(dir);
     } catch (e) {
+      if (session !== this.session) return;
       this.header(this.changesEl, "Changes", () => void this.refreshChanges());
       this.changesEl.append(el("p", "git-note error", api.asError(e).message));
       return;
     }
+    // A reconnect or another folder made this answer stale.
+    if (session !== this.session) return;
     const { repo, status } = result;
     this.repo = repo;
     const branch = !status
@@ -165,6 +181,7 @@ export class GitPanel {
   }
 
   private async reloadHistory() {
+    const run = ++this.historyRun;
     this.loadedSkip = 0;
     this.historyDone = false;
     this.header(this.historyEl, "History", () => void this.reloadHistory());
@@ -173,29 +190,34 @@ export class GitPanel {
     if (!this.repo) {
       const dir = this.dir();
       if (!dir) return;
+      let repo;
       try {
-        this.repo = (await api.gitStatus(dir)).repo;
+        repo = (await api.gitStatus(dir)).repo;
       } catch (e) {
-        list.append(el("p", "git-note error", api.asError(e).message));
+        if (run === this.historyRun) list.append(el("p", "git-note error", api.asError(e).message));
         return;
       }
+      if (run !== this.historyRun) return;
+      this.repo = repo;
     }
     if (!this.repo) {
       list.append(el("p", "git-note", "This folder is not in a git repository."));
       return;
     }
-    await this.loadMore(list, this.repo);
+    await this.loadMore(list, this.repo, run);
   }
 
-  private async loadMore(list: HTMLElement, repo: string) {
+  private async loadMore(list: HTMLElement, repo: string, run: number) {
     list.querySelector(".git-more")?.remove();
     let commits: api.GitCommit[];
     try {
       commits = await api.gitLog(repo, this.loadedSkip, PAGE);
     } catch (e) {
-      list.append(el("p", "git-note error", api.asError(e).message));
+      if (run === this.historyRun) list.append(el("p", "git-note error", api.asError(e).message));
       return;
     }
+    // A newer reload owns the list and the page count now.
+    if (run !== this.historyRun) return;
     if (this.loadedSkip === 0 && commits.length === 0) {
       list.append(el("p", "git-note", "No commits yet."));
     }
@@ -205,7 +227,7 @@ export class GitPanel {
       this.historyDone = true;
     } else {
       const more = el("button", "git-more", "Load older commits");
-      more.addEventListener("click", () => void this.loadMore(list, repo));
+      more.addEventListener("click", () => void this.loadMore(list, repo, run));
       list.append(more);
     }
   }
