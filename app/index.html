@@ -21,11 +21,20 @@
 
     <section id="workspace" hidden>
       <aside id="sidebar">
-        <header>
-          <span id="root-name"></span>
-          <button id="refresh-tree" title="Refresh the file tree">↻</button>
-        </header>
-        <div id="tree"></div>
+        <nav id="side-tabs" role="tablist">
+          <button role="tab" data-view="files" aria-selected="true">Files</button>
+          <button role="tab" data-view="changes" aria-selected="false">Changes</button>
+          <button role="tab" data-view="history" aria-selected="false">History</button>
+        </nav>
+        <section id="files-view" class="side-view">
+          <header>
+            <span id="root-name"></span>
+            <button id="refresh-tree" title="Refresh the file tree" aria-label="Refresh the file tree">↻</button>
+          </header>
+          <div id="tree"></div>
+        </section>
+        <section id="changes-view" class="side-view" hidden></section>
+        <section id="history-view" class="side-view" hidden></section>
       </aside>
       <div id="sash"></div>
       <main id="main">
@@ -34,6 +43,7 @@
         <div id="content">
           <div id="editor"></div>
           <div id="viewer" hidden></div>
+          <div id="diff" hidden></div>
           <div id="placeholder">Open a file from the tree.</div>
         </div>
         <div id="panel-sash" hidden></div>

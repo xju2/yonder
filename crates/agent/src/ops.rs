@@ -20,6 +20,11 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
             data,
             expected_hash,
         } => write_file(Path::new(&path), &data, expected_hash),
+        Op::Git {
+            cwd,
+            args,
+            max_bytes,
+        } => run_git(Path::new(&cwd), &args, max_bytes),
         other => Err(Error::new(
             ErrorKind::Other,
             format!("not a file request: {other:?}"),
@@ -272,6 +277,57 @@ fn write_in_place(target: &Path, data: &[u8]) -> io::Result<()> {
     f.sync_all()
 }
 
+/// Run git without locks, prompts, pagers or colour, keeping at most
+/// `max_bytes` of its output.
+fn run_git(cwd: &Path, args: &[String], max_bytes: u64) -> Result<Reply, Error> {
+    let mut child = std::process::Command::new("git")
+        .args(["-c", "core.quotepath=off", "-c", "color.ui=false"])
+        .args(args)
+        .current_dir(cwd)
+        // `git status` would otherwise refresh the index, a write that can
+        // collide with the user's own git commands.
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                Error::new(ErrorKind::NotFound, "git is not installed on the remote")
+            } else {
+                Error::from(e)
+            }
+        })?;
+    let mut stderr = child.stderr.take().unwrap();
+    let errors = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = (&mut stderr).take(64 * 1024).read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    });
+    let mut stdout = Vec::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .take(max_bytes + 1)
+        .read_to_end(&mut stdout)?;
+    let truncated = stdout.len() as u64 > max_bytes;
+    if truncated {
+        stdout.truncate(max_bytes as usize);
+        let _ = child.kill();
+    }
+    let status = child.wait()?;
+    Ok(Reply::Output {
+        code: status.code(),
+        stdout,
+        stderr: errors.join().unwrap_or_default(),
+        truncated,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +475,32 @@ mod tests {
             path: d.path().join("nope").to_string_lossy().into(),
         };
         assert_eq!(handle(op).unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn git_runs_and_caps_output() {
+        let d = tempfile::tempdir().unwrap();
+        let git = |args: &[&str], max| {
+            let args = args.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+            match run_git(d.path(), &args, max).unwrap() {
+                Reply::Output {
+                    code,
+                    stdout,
+                    stderr,
+                    truncated,
+                } => (code, stdout, stderr, truncated),
+                other => panic!("unexpected reply {other:?}"),
+            }
+        };
+        let (code, _, stderr, _) = git(&["status"], 1 << 20);
+        assert_eq!(code, Some(128), "{stderr}");
+        assert!(stderr.contains("not a git repository"), "{stderr}");
+        assert_eq!(git(&["init", "-q"], 1 << 20).0, Some(0));
+        let (code, out, _, truncated) = git(&["--version"], 4);
+        assert_eq!(
+            (code.is_some(), out.as_slice(), truncated),
+            (true, &b"git "[..], true)
+        );
     }
 
     #[test]

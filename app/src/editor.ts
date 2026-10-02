@@ -7,7 +7,8 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
-import { asError, readBytes, readFile, stat, writeFile } from "./api";
+import { asError, gitDiff, readBytes, readFile, stat, writeFile } from "./api";
+import type { DiffRequest } from "./git";
 import { ask, tell } from "./modal";
 import { createViewer, viewKindFor, type ViewKind, type Viewer } from "./viewer";
 
@@ -79,6 +80,10 @@ interface Tab {
   version: string | null;
   /** The viewer's pending load or reload; the next one waits for it. */
   loading: Promise<void> | null;
+  /** A read-only comparison, for diff tabs. */
+  diff: { original: monaco.editor.ITextModel; modified: monaco.editor.ITextModel } | null;
+  /** Tab title when it is not the file name. */
+  label: string | null;
 }
 
 export class Editors {
@@ -86,9 +91,12 @@ export class Editors {
   private active: Tab | null = null;
   private editor: monaco.editor.IStandaloneCodeEditor;
 
+  private diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
+
   constructor(
     private host: HTMLElement,
     private viewerHost: HTMLElement,
+    private diffHost: HTMLElement,
     private tabsEl: HTMLElement,
     private placeholder: HTMLElement,
     private status: (msg: string) => void,
@@ -150,6 +158,8 @@ export class Editors {
       viewer: null,
       version: null,
       loading: null,
+      diff: null,
+      label: null,
     };
     if (file.text === null) {
       tab.note = `${baseName(path)} is not a text file (${file.size.toLocaleString()} bytes).`;
@@ -195,6 +205,8 @@ export class Editors {
       viewer: null,
       version,
       loading: null,
+      diff: null,
+      label: null,
     };
     const viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
     tab.viewer = viewer;
@@ -220,6 +232,75 @@ export class Editors {
       if (tab.loading === first) tab.loading = null;
       firstLoaded();
     }
+  }
+
+  /** Open a read-only comparison of one file. */
+  async openDiff(req: DiffRequest) {
+    const key = `diff:${req.rev ?? "work"}:${req.repo}/${req.path}`;
+    const name = baseName(req.path);
+    const existing = this.tabs.find((t) => t.path === key);
+    // Uncommitted changes may have moved on since the tab was opened.
+    if (existing && req.rev) return this.show(existing);
+    this.status(`Comparing ${name}…`);
+    let d;
+    try {
+      d = await gitDiff(req.repo, req.path, req.oldPath, req.rev);
+    } catch (e) {
+      this.status("");
+      await tell(`Could not compare ${name}.`, asError(e).message);
+      return;
+    }
+    this.status("");
+    const lang = languageFor(req.path);
+    const raced = this.tabs.find((t) => t.path === key);
+    if (raced) {
+      if (raced.diff && d.original !== null && d.modified !== null) {
+        raced.diff.original.setValue(d.original);
+        raced.diff.modified.setValue(d.modified);
+      }
+      return this.show(raced);
+    }
+    const tab: Tab = {
+      path: key,
+      model: null,
+      note: "",
+      hash: null,
+      savedVersion: 0,
+      view: null,
+      el: document.createElement("div"),
+      viewer: null,
+      version: null,
+      loading: null,
+      diff: null,
+      label: req.rev ? `${name} @ ${req.short}` : `${name} (changes)`,
+    };
+    if (d.original === null || d.modified === null) {
+      tab.note = `${name} is not a text file, so there is no line-by-line comparison.`;
+    } else {
+      tab.diff = {
+        original: monaco.editor.createModel(d.original, lang),
+        modified: monaco.editor.createModel(d.modified, lang),
+      };
+    }
+    this.buildTab(tab);
+    tab.el.title = req.oldPath ? `${req.oldPath} → ${req.path}` : req.path;
+    this.tabs.push(tab);
+    this.show(tab);
+  }
+
+  private getDiffEditor(): monaco.editor.IStandaloneDiffEditor {
+    this.diffEditor ??= monaco.editor.createDiffEditor(this.diffHost, {
+      automaticLayout: true,
+      readOnly: true,
+      originalEditable: false,
+      fontFamily: '"SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
+      fontSize: 13,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      // Narrow windows show the change inline instead of side by side.
+      useInlineViewWhenSpaceIsLimited: true,
+    });
+    return this.diffEditor;
   }
 
   /** Re-check the active image or PDF and reload it if it changed on the remote. */
@@ -340,6 +421,12 @@ export class Editors {
     tab.el.remove();
     tab.model?.dispose();
     tab.viewer?.dispose();
+    if (tab.diff) {
+      // Detach before disposing, or the diff editor keeps dead models.
+      if (this.diffEditor?.getModel()?.original === tab.diff.original) this.diffEditor.setModel(null);
+      tab.diff.original.dispose();
+      tab.diff.modified.dispose();
+    }
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
   }
 
@@ -352,7 +439,7 @@ export class Editors {
     tab.el.title = tab.path;
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = baseName(tab.path);
+    name.textContent = tab.label ?? baseName(tab.path);
     const close = document.createElement("button");
     close.className = "close";
     close.title = "Close";
@@ -380,12 +467,18 @@ export class Editors {
     this.tabs.forEach((t) => this.paintTab(t));
     const hasText = !!tab?.model;
     const viewer = tab?.viewer ?? null;
+    const diff = tab?.diff ?? null;
     this.host.style.visibility = hasText ? "visible" : "hidden";
-    this.host.style.display = viewer ? "none" : "";
+    this.host.style.display = viewer || diff ? "none" : "";
+    this.diffHost.hidden = !diff;
+    if (diff) {
+      this.getDiffEditor().setModel(diff);
+      this.position("");
+    }
     this.viewerHost.hidden = !viewer;
     if (viewer) this.viewerHost.replaceChildren(viewer.el);
     else this.viewerHost.replaceChildren();
-    this.placeholder.hidden = hasText || !!viewer;
+    this.placeholder.hidden = hasText || !!viewer || !!diff;
     this.placeholder.textContent = tab ? tab.note : "Open a file from the tree.";
     this.editor.setModel(tab?.model ?? null);
     if (tab?.model) {

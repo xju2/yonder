@@ -9,6 +9,7 @@
 
 mod bootstrap;
 mod connection;
+pub mod git;
 
 pub use bootstrap::{connect, find_agent, ConnectError, ConnectOptions, SUPPORTED_ARCHES};
 pub use connection::Connection;

@@ -382,3 +382,96 @@ async fn terminal_output_waits_for_acknowledgement() {
     .expect("terminal did not exit");
     assert_eq!(exited, pty);
 }
+
+#[tokio::test]
+async fn git_status_history_and_contents() {
+    use yonder_client::git;
+    let fx = Fixture::new("");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+
+    let repo = fx.home().join("repo");
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    let sh = |cmd: &str| {
+        let ok = std::process::Command::new("sh")
+            .args(["-c", cmd])
+            .current_dir(&repo)
+            .env("GIT_AUTHOR_NAME", "Ada")
+            .env("GIT_AUTHOR_EMAIL", "ada@example.org")
+            .env("GIT_COMMITTER_NAME", "Ada")
+            .env("GIT_COMMITTER_EMAIL", "ada@example.org")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{cmd}");
+    };
+    let root = repo.to_string_lossy().to_string();
+    let sub = repo.join("src").to_string_lossy().to_string();
+
+    // Not a repository yet.
+    assert_eq!(git::repo_root(&conn, &root).await.unwrap(), None);
+
+    sh(
+        "git init -q -b main && printf 'one\\n' > a.txt && printf 'old\\n' > src/old.rs \
+        && git add . && git commit -qm 'First commit'",
+    );
+    sh("git mv src/old.rs src/new.rs && printf 'one\\ntwo\\n' > a.txt && git commit -qam 'Second: rename'");
+    sh("printf 'one\\ntwo\\nthree\\n' > a.txt && printf 'x\\n' > untracked.txt");
+
+    // Found from a subfolder too.
+    let top = git::repo_root(&conn, &sub).await.unwrap().unwrap();
+    assert_eq!(
+        std::fs::canonicalize(&top).unwrap(),
+        std::fs::canonicalize(&repo).unwrap()
+    );
+
+    let st = git::status(&conn, &top).await.unwrap();
+    assert_eq!(st.branch.as_deref(), Some("main"));
+    let files: Vec<_> = st
+        .files
+        .iter()
+        .map(|c| (c.status, c.path.as_str()))
+        .collect();
+    assert_eq!(files, vec![('M', "a.txt"), ('?', "untracked.txt")]);
+
+    let log = git::log(&conn, &top, 0, 10).await.unwrap();
+    let subjects: Vec<_> = log.iter().map(|c| c.subject.as_str()).collect();
+    assert_eq!(subjects, vec!["Second: rename", "First commit"]);
+    assert_eq!(log[0].author, "Ada");
+    assert_eq!(git::log(&conn, &top, 1, 10).await.unwrap().len(), 1);
+
+    let changed = git::commit_files(&conn, &top, &log[0].hash).await.unwrap();
+    let changed: Vec<_> = changed
+        .iter()
+        .map(|c| (c.status, c.path.as_str(), c.old_path.as_deref()))
+        .collect();
+    assert_eq!(
+        changed,
+        vec![
+            ('M', "a.txt", None),
+            ('R', "src/new.rs", Some("src/old.rs"))
+        ]
+    );
+    // The root commit lists everything as added.
+    let first = git::commit_files(&conn, &top, &log[1].hash).await.unwrap();
+    assert!(first.iter().all(|c| c.status == 'A'));
+
+    assert_eq!(
+        git::file_at(&conn, &top, "HEAD", "a.txt")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(&b"one\ntwo\n"[..])
+    );
+    let parent = format!("{}^", log[1].hash);
+    assert_eq!(
+        git::file_at(&conn, &top, &parent, "a.txt").await.unwrap(),
+        None
+    );
+    assert_eq!(
+        git::file_at(&conn, &top, "HEAD", "missing.txt")
+            .await
+            .unwrap(),
+        None
+    );
+}

@@ -6,7 +6,8 @@ Typing never waits on the network: files are edited locally and only saving
 goes to the remote. Nothing is left running, locked, or half-installed on the
 remote, and when a connection fails Yonder tells you which step failed and why.
 
-**Status:** connect, browse, edit and save; view images and PDFs; terminals. See the
+**Status:** connect, browse, edit and save; view images and PDFs; terminals;
+git changes and history. See the
 [roadmap](#roadmap).
 
 ## Using it
@@ -32,6 +33,11 @@ ssh -o BatchMode=yes <host> true
 - **Images and PDFs** (PNG, JPEG, GIF, WebP, SVG, PDF, …) open in a viewer.
   When you come back to the window, or press ↻, a file that changed on the
   remote (a regenerated plot, say) is reloaded, keeping zoom and position.
+- **Git:** the sidebar's **Changes** tab lists uncommitted files (staged and
+  not) against the last commit; **History** lists commits, and expanding one
+  shows its files. Clicking a file opens a side-by-side diff. It is read-only:
+  commit from the terminal. Git runs without taking locks, so browsing never
+  gets in the way of your own git commands.
 - **Terminal:** <kbd>Ctrl</kbd>+<kbd>`</kbd> or the Terminal button opens your
   login shell on the remote, in the open folder; + adds more. A program that
   prints endlessly is paused rather than flooding the window, so
@@ -45,7 +51,7 @@ ssh -o BatchMode=yes <host> true
  your Mac                                       remote (Linux)
 ┌──────────────────────────────────┐   ssh    ┌──────────────────────────────┐
 │ Yonder.app (Tauri)               │  stdio   │ yonder-agent (static binary) │
-│  ├ UI: TypeScript + Monaco       │◄────────►│  files and terminals         │
+│  ├ UI: TypeScript + Monaco       │◄────────►│  files, terminals, git       │
 │  └ Rust: runs ssh, routes msgs   │ msgpack  │  exits when ssh closes       │
 └──────────────────────────────────┘  frames  └──────────────────────────────┘
 ```
@@ -65,7 +71,7 @@ ownership survive.
 |---|---|
 | `crates/proto` | Messages and framing shared by both sides |
 | `crates/agent` | `yonder-agent`, the remote side: files, and shells on pseudo-terminals |
-| `crates/client` | Starts the agent over ssh; request routing |
+| `crates/client` | Starts the agent over ssh; request routing; git parsing |
 | `app/src-tauri` | Desktop process: Tauri commands over the client |
 | `app/src` | UI: file tree, tabs, Monaco editor, image and PDF viewers ([pdf.js](https://mozilla.github.io/pdf.js/)), terminals ([xterm.js](https://xtermjs.org/)) |
 
@@ -115,8 +121,8 @@ agent through a stand-in for `ssh`.
 1. **Connect and edit** — done.
 2. **Watching and terminal:** terminal tabs are done; periodic re-listing of
    open folders and open files is next.
-3. **Git and viewers:** changed files with diffs, commit history. Image and
-   PDF viewers are done.
+3. **Git and viewers** — done: changed files and history with diffs; image
+   and PDF viewers.
 4. **Hardening:** automatic reconnect, password and MFA prompts, large-file
    handling, signing.
 5. **AI suggestions (optional):** propose small edits, shown as a diff to

@@ -8,4 +8,5 @@ license.workspace = true
 [dependencies]
 yonder-proto.workspace = true
 tokio.workspace = true
+serde.workspace = true
 sha2 = "0.10"

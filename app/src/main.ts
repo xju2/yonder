@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
+import { GitPanel } from "./git";
 import { ask } from "./modal";
 import { TerminalPanel } from "./terminal";
 import { FileTree } from "./tree";
@@ -110,6 +111,7 @@ const tree = new FileTree($("tree"), (path) => void editors.open(path));
 const editors = new Editors(
   $("editor"),
   $("viewer"),
+  $("diff"),
   $("tabs"),
   $("placeholder"),
   (msg) => status(msg),
@@ -143,6 +145,8 @@ window.addEventListener(
 
 async function startSession(info: api.ConnInfo) {
   conn = info;
+  git.reset();
+  if (sideView !== "files") void showSideView(sideView);
   connectView.hidden = true;
   workspace.hidden = false;
   banner.hidden = true;
@@ -221,7 +225,36 @@ window.addEventListener("focus", () => {
   if (!conn || workspace.hidden) return;
   void tree.refresh();
   editors.refreshActive();
+  if (sideView === "changes") void git.refreshChanges();
 });
+
+// ---- sidebar views: Files, Changes, History
+
+type SideView = "files" | "changes" | "history";
+let sideView: SideView = "files";
+const git = new GitPanel(
+  $("changes-view"),
+  $("history-view"),
+  () => conn?.root ?? null,
+  (req) => void editors.openDiff(req),
+);
+
+async function showSideView(view: SideView) {
+  sideView = view;
+  for (const b of document.querySelectorAll<HTMLButtonElement>("#side-tabs button")) {
+    b.setAttribute("aria-selected", String(b.dataset.view === view));
+  }
+  $("files-view").hidden = view !== "files";
+  $("changes-view").hidden = view !== "changes";
+  $("history-view").hidden = view !== "history";
+  // Changes are re-read each time: they move with every save.
+  if (view === "changes") await git.refreshChanges();
+  if (view === "history") await git.showHistory();
+}
+
+for (const b of document.querySelectorAll<HTMLButtonElement>("#side-tabs button")) {
+  b.addEventListener("click", () => void showSideView(b.dataset.view as SideView));
+}
 
 // ---- terminal panel height
 
