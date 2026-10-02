@@ -699,7 +699,9 @@ fn copy_png(request: tauri::ipc::Request<'_>) -> Result<(), String> {
         "set the clipboard to (read (POSIX file \"{}\") as «class PNGf»)",
         path.display()
     );
-    let out = std::process::Command::new("osascript").args(["-e", &script]).output();
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output();
     let _ = std::fs::remove_file(&path);
     let out = out.map_err(|e| format!("osascript: {e}"))?;
     if !out.status.success() {

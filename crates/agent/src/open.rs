@@ -13,7 +13,9 @@ pub fn run(args: &[String]) -> i32 {
         return 1;
     }
     if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
-        eprintln!("usage: yonder FILE...\nOpens files in the Yonder window this terminal belongs to.");
+        eprintln!(
+            "usage: yonder FILE...\nOpens files in the Yonder window this terminal belongs to."
+        );
         return 2;
     }
     let tmux = std::env::var_os("TMUX").is_some();
