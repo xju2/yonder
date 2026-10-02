@@ -116,7 +116,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   height: 100%;
   display: grid;
   grid-template-columns: var(--sidebar) 4px 1fr;
-  grid-template-rows: 1fr 24px;
+  grid-template-rows: minmax(0, 1fr) 24px;
 }
 #sidebar {
   background: var(--bg-side);
