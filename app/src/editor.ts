@@ -8,6 +8,7 @@ import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { marked } from "marked";
+import "./languages";
 // The code font, bundled: Zed's default is a variant of IBM Plex Mono.
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/400-italic.css";
@@ -50,10 +51,17 @@ const dark = window.matchMedia("(prefers-color-scheme: dark)");
 const applyTheme = () => monaco.editor.setTheme(dark.matches ? "vs-dark" : "vs");
 dark.addEventListener("change", applyTheme);
 
+/** A file-name glob where `*` is any run of characters. */
+const globMatch = (glob: string, name: string) =>
+  new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`).test(name);
+
 function languageFor(path: string): string {
   const name = path.split("/").pop()!.toLowerCase();
   for (const lang of monaco.languages.getLanguages()) {
     if (lang.filenames?.some((f) => f.toLowerCase() === name)) return lang.id;
+  }
+  for (const lang of monaco.languages.getLanguages()) {
+    if (lang.filenamePatterns?.some((p) => globMatch(p.toLowerCase(), name))) return lang.id;
   }
   let best = "plaintext";
   let bestLen = 0;
