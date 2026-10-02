@@ -10,7 +10,7 @@
 mod bootstrap;
 mod connection;
 
-pub use bootstrap::{connect, find_agent, ConnectError, ConnectOptions};
+pub use bootstrap::{connect, find_agent, ConnectError, ConnectOptions, SUPPORTED_ARCHES};
 pub use connection::Connection;
 
 /// A line for the connection log the app shows while connecting.

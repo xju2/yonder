@@ -69,10 +69,17 @@ impl std::fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
+/// CPU architectures (as `uname -m` prints them) Yonder builds agents for.
+/// The value comes from the remote, so only these are ever used in a path.
+pub const SUPPORTED_ARCHES: &[&str] = &["x86_64", "aarch64"];
+
 /// Look for the agent build for `arch` (as printed by `uname -m`) in `dirs`.
 /// Accepts both the packaged name `yonder-agent-<arch>-linux` and a Cargo
 /// target directory layout, `<arch>-unknown-linux-musl/release/yonder-agent`.
 pub fn find_agent(dirs: &[PathBuf], arch: &str) -> Option<PathBuf> {
+    if !SUPPORTED_ARCHES.contains(&arch) {
+        return None;
+    }
     dirs.iter()
         .flat_map(|d| {
             [
@@ -118,8 +125,10 @@ impl Session {
         }
     }
 
-    /// Read stdout lines until one carries a marker from `wanted`. Other lines
-    /// are login-shell noise and are only logged.
+    /// Read stdout lines until one starts with a marker from `wanted`. Other
+    /// lines are login-shell noise and are only logged. The script prints each
+    /// marker at the start of its own line, so noise that merely mentions one
+    /// is not mistaken for it.
     async fn marker(&mut self, wanted: &[&str], limit: Duration) -> Result<String, ConnectError> {
         let read = async {
             let mut line = String::new();
@@ -131,14 +140,12 @@ impl Session {
                     Err(e) => return Err(format!("reading from ssh failed: {e}")),
                 }
                 let text = line.trim();
-                if let Some(at) = text.find("YONDER-") {
-                    let marker = &text[at..];
-                    if marker == "YONDER-FAILED" {
-                        return Err("installing the agent failed".into());
-                    }
-                    if wanted.iter().any(|w| marker.starts_with(w)) {
-                        return Ok(marker.to_string());
-                    }
+                let token = text.split_whitespace().next().unwrap_or_default();
+                if token == "YONDER-FAILED" {
+                    return Err("installing the agent failed".into());
+                }
+                if wanted.contains(&token) {
+                    return Ok(text.to_string());
                 }
                 if !text.is_empty() {
                     (self.log)(LogLine {
@@ -270,6 +277,14 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
     if os != "Linux" {
         return Err(s
             .fail(format!("the remote runs {os:?}; only Linux is supported"))
+            .await);
+    }
+    if !SUPPORTED_ARCHES.contains(&arch.as_str()) {
+        return Err(s
+            .fail(format!(
+                "the remote CPU is {arch:?}; Yonder supports {}",
+                SUPPORTED_ARCHES.join(" and ")
+            ))
             .await);
     }
 
@@ -422,6 +437,9 @@ mod tests {
         assert!(find_agent(&dirs, "x86_64").is_some());
         assert!(find_agent(&dirs, "aarch64").is_some());
         assert!(find_agent(&dirs, "riscv64").is_none());
+        // Remote-supplied values never become paths outside `dirs`.
+        assert!(find_agent(&dirs, "../x86_64").is_none());
+        assert!(find_agent(&dirs, "/etc/passwd").is_none());
         std::fs::remove_dir_all(d).unwrap();
     }
 }

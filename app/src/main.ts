@@ -167,9 +167,12 @@ async function reconnect(btn: HTMLButtonElement) {
   btn.disabled = true;
   btn.textContent = "Reconnecting…";
   try {
+    const oldRoot = conn?.root;
     const info = await api.connect(target.host, target.folder || "~");
     await startSession(info);
-    await tree.refresh();
+    // The folder may resolve differently now (a moved symlink, say).
+    if (info.root === oldRoot) await tree.refresh();
+    else await tree.setRoot(info.root);
     status(`Reconnected to ${info.host}`);
   } catch (err) {
     const ce = api.asError(err);

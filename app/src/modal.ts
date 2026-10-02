@@ -13,11 +13,21 @@ export interface Choice {
   danger?: boolean;
 }
 
+// One dialog at a time: later questions wait for earlier ones to be answered.
+let queue: Promise<unknown> = Promise.resolve();
+
 /**
  * Show `text` with one button per choice and resolve to the chosen value.
  * Escape resolves to "cancel".
  */
 export function ask(text: string, choices: Choice[], detail?: string): Promise<string> {
+  const run = () => show(text, choices, detail);
+  const answer = queue.then(run, run);
+  queue = answer.catch(() => {});
+  return answer;
+}
+
+function show(text: string, choices: Choice[], detail?: string): Promise<string> {
   textEl.textContent = text;
   detailEl.hidden = !detail;
   detailEl.textContent = detail ?? "";

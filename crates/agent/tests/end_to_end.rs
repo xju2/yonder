@@ -86,6 +86,14 @@ async fn installs_once_then_reuses() {
 }
 
 #[tokio::test]
+async fn noise_mentioning_a_marker_is_ignored() {
+    let fx = Fixture::new("motd: see YONDER-HELLO Plan9 mips for details\\n");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+    assert_eq!(conn.info().home, fx.home().to_string_lossy());
+}
+
+#[tokio::test]
 async fn file_operations_over_the_connection() {
     let fx = Fixture::new("");
     let (_, sink) = collect_log();

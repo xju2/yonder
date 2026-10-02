@@ -154,6 +154,7 @@ button:disabled { opacity: 0.6; cursor: default; }
   user-select: none;
 }
 #tree .row:hover { background: var(--bg-hover); }
+#tree .row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 #tree .row.active { background: var(--bg-active); }
 #tree .row.dotfile, #tree .row.broken, #tree .row.other { color: var(--fg-dim); }
 #tree .twisty { width: 14px; flex: none; text-align: center; color: var(--fg-dim); }

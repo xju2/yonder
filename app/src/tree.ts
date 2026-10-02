@@ -6,6 +6,9 @@ import { asError, listDir, type Entry } from "./api";
 /** Directories this large are truncated; the terminal is better for them. */
 const MAX_SHOWN = 5000;
 
+/** Folders re-listed at once during a refresh. */
+const REFRESH_PARALLEL = 4;
+
 interface Node {
   path: string;
   name: string;
@@ -24,6 +27,7 @@ export const joinPath = (dir: string, name: string) =>
 export class FileTree {
   private root: Node | null = null;
   private active: string | null = null;
+  private refreshing: Promise<void> | null = null;
 
   constructor(
     private container: HTMLElement,
@@ -36,13 +40,20 @@ export class FileTree {
     this.root.expanded = true;
     const ul = document.createElement("ul");
     ul.className = "tree-root";
+    ul.setAttribute("role", "tree");
     ul.append(this.root.li);
     this.container.replaceChildren(ul);
     await this.load(this.root);
   }
 
   /** Re-list every expanded folder, keeping what is expanded. */
-  async refresh() {
+  refresh(): Promise<void> {
+    // Repeated focus events while a refresh runs share it.
+    this.refreshing ??= this.refreshOpen().finally(() => (this.refreshing = null));
+    return this.refreshing;
+  }
+
+  private async refreshOpen() {
     const open: Node[] = [];
     const walk = (n: Node) => {
       if (n.kind === "dir" && n.expanded) {
@@ -51,7 +62,12 @@ export class FileTree {
       }
     };
     if (this.root) walk(this.root);
-    await Promise.all(open.map((n) => this.load(n)));
+    // A few at a time: a large expanded tree must not flood the connection.
+    let next = 0;
+    const worker = async () => {
+      while (next < open.length) await this.load(open[next++]);
+    };
+    await Promise.all(Array.from({ length: REFRESH_PARALLEL }, worker));
   }
 
   setActive(path: string | null) {
@@ -79,6 +95,8 @@ export class FileTree {
     if (path === this.active) row.classList.add("active");
     row.dataset.path = path;
     row.title = e.symlink ? `${path} (symbolic link)` : path;
+    row.setAttribute("role", "treeitem");
+    row.tabIndex = 0;
     const twisty = document.createElement("span");
     twisty.className = "twisty";
     const label = document.createElement("span");
@@ -86,6 +104,7 @@ export class FileTree {
     label.textContent = e.name + (e.symlink ? " ↗" : "");
     row.append(twisty, label);
     row.addEventListener("click", () => this.activate(node));
+    row.addEventListener("keydown", (ev) => this.onKey(ev, node));
     li.append(row);
     this.paintTwisty(node);
     return node;
@@ -94,6 +113,36 @@ export class FileTree {
   private paintTwisty(n: Node) {
     const t = n.li.querySelector(".twisty")!;
     t.textContent = n.kind === "dir" ? (n.expanded ? "▾" : "▸") : "";
+    if (n.kind === "dir") n.li.firstElementChild!.setAttribute("aria-expanded", String(n.expanded));
+  }
+
+  /** Enter or Space opens; arrows move between visible rows and fold folders. */
+  private onKey(ev: KeyboardEvent, n: Node) {
+    const rows = [...this.container.querySelectorAll<HTMLElement>(".row")].filter(
+      (r) => r.offsetParent !== null,
+    );
+    const i = rows.indexOf(ev.currentTarget as HTMLElement);
+    switch (ev.key) {
+      case "Enter":
+      case " ":
+        void this.activate(n);
+        break;
+      case "ArrowDown":
+        rows[i + 1]?.focus();
+        break;
+      case "ArrowUp":
+        rows[i - 1]?.focus();
+        break;
+      case "ArrowRight":
+        if (n.kind === "dir" && !n.expanded) void this.activate(n);
+        break;
+      case "ArrowLeft":
+        if (n.kind === "dir" && n.expanded) void this.activate(n);
+        break;
+      default:
+        return;
+    }
+    ev.preventDefault();
   }
 
   private async activate(n: Node) {
@@ -133,6 +182,7 @@ export class FileTree {
 
   private paintChildren(n: Node) {
     const ul = document.createElement("ul");
+    ul.setAttribute("role", "group");
     for (const c of n.children ?? []) ul.append(c.li);
     const note = (text: string) => {
       const li = document.createElement("li");

@@ -4,8 +4,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use yonder_proto::{
-    content_hash, Entry, EntryKind, Error, ErrorKind, FileStat, HelloInfo, Op, Reply,
-    PROTOCOL_VERSION,
+    content_hash, ContentHasher, Entry, EntryKind, Error, ErrorKind, FileStat, HelloInfo, Op,
+    Reply, PROTOCOL_VERSION,
 };
 
 pub fn handle(op: Op) -> Result<Reply, Error> {
@@ -73,12 +73,20 @@ fn list_dir(dir: &Path) -> Result<Vec<Entry>, Error> {
     let mut out = Vec::new();
     for item in fs::read_dir(dir)? {
         let item = item?;
-        let name = item.file_name().to_string_lossy().into_owned();
+        // Paths travel as UTF-8. A name that is not UTF-8 is still listed so
+        // nothing hides, but as `Other`, since a path rebuilt from its lossy
+        // form would not reach it.
+        let (name, utf8) = match item.file_name().into_string() {
+            Ok(name) => (name, true),
+            Err(raw) => (raw.to_string_lossy().into_owned(), false),
+        };
         let Ok(lmeta) = item.metadata() else {
             continue; // vanished between readdir and stat
         };
         let symlink = lmeta.file_type().is_symlink();
-        let (kind, stat) = if symlink {
+        let (kind, stat) = if !utf8 {
+            (EntryKind::Other, stat_of(&lmeta))
+        } else if symlink {
             match fs::metadata(item.path()) {
                 Ok(m) => (kind_of(&m), stat_of(&m)),
                 Err(_) => (EntryKind::BrokenLink, stat_of(&lmeta)),
@@ -150,23 +158,24 @@ fn write_file(path: &Path, data: &[u8], expected_hash: Option<u64>) -> Result<Re
     if existing.as_ref().is_some_and(|m| m.is_dir()) {
         return Err(Error::new(ErrorKind::IsDirectory, "is a directory"));
     }
-    if let Some(expected) = expected_hash {
-        match &existing {
-            None => {
-                return Err(Error::new(
-                    ErrorKind::Conflict,
-                    "the file was deleted on the remote since it was opened",
-                ))
-            }
-            Some(_) if content_hash(&fs::read(&target)?) != expected => {
-                return Err(Error::new(
-                    ErrorKind::Conflict,
-                    "the file changed on the remote since it was opened",
-                ))
-            }
-            Some(_) => {}
+    // Run as late as possible: right before the new content replaces the old.
+    let unchanged = || -> Result<(), Error> {
+        let Some(expected) = expected_hash else {
+            return Ok(());
+        };
+        match file_hash(&target) {
+            Ok(h) if h == expected => Ok(()),
+            Ok(_) => Err(Error::new(
+                ErrorKind::Conflict,
+                "the file changed on the remote since it was opened",
+            )),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Err(Error::new(
+                ErrorKind::Conflict,
+                "the file was deleted on the remote since it was opened",
+            )),
+            Err(e) => Err(e.into()),
         }
-    }
+    };
 
     // Write to a temporary file and rename it over the original, so a crash
     // or a full disk never leaves a half-written file. Fall back to writing in
@@ -175,13 +184,14 @@ fn write_file(path: &Path, data: &[u8], expected_hash: Option<u64>) -> Result<Re
     // not create files in.
     let replaced = match &existing {
         Some(m) if m.nlink() > 1 => false,
-        _ => match replace_atomically(&target, data, existing.as_ref()) {
+        _ => match replace_atomically(&target, data, existing.as_ref(), &unchanged) {
             Ok(done) => done,
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && existing.is_some() => false,
-            Err(e) => return Err(e.into()),
+            Err(e) if e.kind == ErrorKind::PermissionDenied && existing.is_some() => false,
+            Err(e) => return Err(e),
         },
     };
     if !replaced {
+        unchanged()?;
         write_in_place(&target, data)?;
     }
     Ok(Reply::Written {
@@ -190,8 +200,28 @@ fn write_file(path: &Path, data: &[u8], expected_hash: Option<u64>) -> Result<Re
     })
 }
 
+/// Hash a file without holding it all in memory; it may have grown a lot
+/// since it was opened.
+fn file_hash(path: &Path) -> io::Result<u64> {
+    let mut f = File::open(path)?;
+    let mut h = ContentHasher::default();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match f.read(&mut buf)? {
+            0 => return Ok(h.finish()),
+            n => h.update(&buf[..n]),
+        }
+    }
+}
+
 /// Returns `Ok(false)` if the replacement would change the file's owner.
-fn replace_atomically(target: &Path, data: &[u8], orig: Option<&Metadata>) -> io::Result<bool> {
+/// `unchanged` is checked just before the rename.
+fn replace_atomically(
+    target: &Path,
+    data: &[u8],
+    orig: Option<&Metadata>,
+    unchanged: &dyn Fn() -> Result<(), Error>,
+) -> Result<bool, Error> {
     let dir = target.parent().unwrap_or(Path::new("/"));
     let name = target
         .file_name()
@@ -204,16 +234,20 @@ fn replace_atomically(target: &Path, data: &[u8], orig: Option<&Metadata>) -> io
     let tmp = dir.join(format!(".{name}.yonder-{}-{nanos}.tmp", std::process::id()));
 
     let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let result = (|| {
+    let result = (|| -> Result<bool, Error> {
         if let Some(m) = orig {
             let t = f.metadata()?;
             if t.uid() != m.uid() || t.gid() != m.gid() {
                 return Ok(false);
             }
-            f.set_permissions(m.permissions())?;
         }
         f.write_all(data)?;
+        // After writing: a write clears setuid and setgid bits.
+        if let Some(m) = orig {
+            f.set_permissions(m.permissions())?;
+        }
         f.sync_all()?;
+        unchanged()?;
         fs::rename(&tmp, target)?;
         Ok(true)
     })();
@@ -329,6 +363,39 @@ mod tests {
         fs::hard_link(&a, &b).unwrap();
         write_file(&a, b"new", None).unwrap();
         assert_eq!(fs::read(&b).unwrap(), b"new");
+    }
+
+    #[test]
+    fn keeps_setgid_bit() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("tool");
+        fs::write(&p, "old").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o2755)).unwrap();
+        write_file(&p, b"new", None).unwrap();
+        assert_eq!(
+            fs::metadata(&p).unwrap().permissions().mode() & 0o7777,
+            0o2755
+        );
+    }
+
+    #[test]
+    fn conflict_leaves_no_temporary_file() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.txt");
+        fs::write(&p, "theirs").unwrap();
+        let err = write_file(&p, b"mine", Some(content_hash(b"old"))).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::Conflict);
+        assert_eq!(fs::read_dir(d.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn non_utf8_names_are_listed_as_other() {
+        use std::os::unix::ffi::OsStrExt;
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join(std::ffi::OsStr::from_bytes(b"bad\xff")), "x").unwrap();
+        let entries = list_dir(d.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, EntryKind::Other);
     }
 
     #[test]

@@ -43,6 +43,11 @@ pub enum Op {
     /// With `expected_hash`, the write only happens if the file on disk still
     /// hashes to it; otherwise the reply is [`ErrorKind::Conflict`].
     /// `None` means "create or overwrite unconditionally".
+    ///
+    /// The check runs immediately before the new content is committed, but
+    /// POSIX offers no compare-and-swap for files, so a write by another
+    /// process in that last instant can still be overwritten. It catches the
+    /// common case: a file changed minutes ago by a job or another editor.
     WriteFile {
         path: String,
         #[serde(with = "serde_bytes")]
@@ -165,13 +170,32 @@ impl std::error::Error for Error {}
 
 /// FNV-1a, 64 bit. Used to detect that a file changed between read and save;
 /// mtime alone is not enough on filesystems with one-second resolution.
-pub fn content_hash(data: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+#[derive(Clone, Copy, Debug)]
+pub struct ContentHasher(u64);
+
+impl Default for ContentHasher {
+    fn default() -> Self {
+        ContentHasher(0xcbf2_9ce4_8422_2325)
     }
-    h
+}
+
+impl ContentHasher {
+    pub fn update(&mut self, data: &[u8]) {
+        for &b in data {
+            self.0 ^= b as u64;
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    pub fn finish(self) -> u64 {
+        self.0
+    }
+}
+
+pub fn content_hash(data: &[u8]) -> u64 {
+    let mut h = ContentHasher::default();
+    h.update(data);
+    h.finish()
 }
 
 /// Serialize `msg` into a complete frame (length prefix included).
@@ -272,6 +296,14 @@ mod tests {
     #[test]
     fn oversized_length_is_rejected() {
         assert!(frame_len(u32::MAX.to_be_bytes()).is_err());
+    }
+
+    #[test]
+    fn incremental_hash_matches() {
+        let mut h = ContentHasher::default();
+        h.update(b"hello ");
+        h.update(b"world");
+        assert_eq!(h.finish(), content_hash(b"hello world"));
     }
 
     #[test]

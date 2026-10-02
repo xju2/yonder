@@ -63,7 +63,7 @@ ownership survive.
 
 ## Building
 
-You need Rust (via [rustup](https://rustup.rs)) and Node.js 20 or newer.
+You need Rust (via [rustup](https://rustup.rs)) and Node.js 20.19+ or 22.12+.
 
 ```sh
 scripts/build-agents.sh        # static Linux agents for x86_64 and aarch64
