@@ -1,0 +1,14 @@
+[package]
+name = "yonder-agent"
+description = "Remote side of Yonder: a static binary started over ssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+yonder-proto.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+yonder-client.workspace = true
+tokio.workspace = true

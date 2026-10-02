@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yonder</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <section id="connect-view">
+      <form id="connect-form" class="card">
+        <h1>Yonder</h1>
+        <label>Host <input id="host" placeholder="perlmutter" autocomplete="off" spellcheck="false" required /></label>
+        <label>Folder <input id="folder" placeholder="~/project" autocomplete="off" spellcheck="false" /></label>
+        <button id="connect-btn" type="submit">Connect</button>
+        <div id="recent"></div>
+        <div id="connect-error" hidden></div>
+        <ol id="connect-log"></ol>
+      </form>
+    </section>
+
+    <section id="workspace" hidden>
+      <aside id="sidebar">
+        <header>
+          <span id="root-name"></span>
+          <button id="refresh-tree" title="Refresh the file tree">↻</button>
+        </header>
+        <div id="tree"></div>
+      </aside>
+      <div id="sash"></div>
+      <main id="main">
+        <nav id="tabs"></nav>
+        <div id="banner" hidden></div>
+        <div id="editor"></div>
+        <div id="placeholder">Open a file from the tree.</div>
+      </main>
+      <footer id="status">
+        <span id="status-conn"></span>
+        <span id="status-msg"></span>
+        <span id="status-pos"></span>
+      </footer>
+    </section>
+
+    <dialog id="modal">
+      <form method="dialog">
+        <p id="modal-text"></p>
+        <pre id="modal-detail" hidden></pre>
+        <menu id="modal-buttons"></menu>
+      </form>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
