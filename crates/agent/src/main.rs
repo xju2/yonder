@@ -5,6 +5,7 @@
 //! state on disk and takes no locks, which matters on shared filesystems such
 //! as Lustre or NFS.
 
+mod open;
 mod ops;
 mod pty;
 
@@ -14,6 +15,11 @@ use std::thread;
 use yonder_proto::{read_frame, write_frame, AgentMsg, Op, Request, MAGIC, NO_REPLY};
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    // Run as `yonder` through the link our terminals put on PATH.
+    if args.first().and_then(|a| a.rsplit('/').next()) == Some("yonder") {
+        std::process::exit(open::run(&args[1..]));
+    }
     if std::env::args().any(|a| a == "--version") {
         println!("yonder-agent {}", env!("CARGO_PKG_VERSION"));
         return;

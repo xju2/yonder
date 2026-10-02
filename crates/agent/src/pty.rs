@@ -6,10 +6,11 @@
 //! the kernel hangs up every shell, so nothing is left running.
 
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
@@ -135,6 +136,7 @@ impl Ptys {
             .current_dir(cwd.unwrap_or(home))
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
+            .env("YONDER_TERMINAL", "1")
             .stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave));
@@ -147,6 +149,14 @@ impl Ptys {
                 }
                 Ok(())
             });
+        }
+        if let Some(dir) = command_dir() {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let mut dirs = vec![dir];
+            dirs.extend(std::env::split_paths(&path));
+            if let Ok(joined) = std::env::join_paths(dirs) {
+                cmd.env("PATH", joined);
+            }
         }
         let mut child = cmd.spawn().map_err(|e| {
             let message = format!("could not start {shell}: {e}");
@@ -210,6 +220,24 @@ impl Ptys {
 
 fn gone(pty: u64) -> Error {
     Error::new(ErrorKind::NotFound, format!("terminal {pty} has exited"))
+}
+
+/// A `bin` directory beside the agent holding `yonder`, a link to it, so a
+/// shell in one of our terminals can run `yonder FILE` to open the file in
+/// the app. The link is relative and remade only when it no longer resolves,
+/// for instance after the agent it pointed to was replaced.
+fn command_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.join("bin");
+    let link = dir.join("yonder");
+    if !link.exists() {
+        fs::create_dir_all(&dir).ok()?;
+        let tmp = dir.join(format!("yonder.tmp.{}", std::process::id()));
+        let _ = fs::remove_file(&tmp);
+        std::os::unix::fs::symlink(Path::new("..").join(exe.file_name()?), &tmp).ok()?;
+        fs::rename(&tmp, &link).ok()?;
+    }
+    Some(dir)
 }
 
 fn open_pty(cols: u16, rows: u16) -> io::Result<(File, OwnedFd)> {

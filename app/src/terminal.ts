@@ -55,6 +55,8 @@ export class TerminalPanel {
     private body: HTMLElement,
     /** Where new shells start: the open folder. */
     private cwd: () => string | null,
+    /** `yonder FILE` was run in a terminal. */
+    private onOpen: (path: string) => void,
   ) {
     void api.onPtyExit((e) => this.exited(e.pty, e.code));
     dark.addEventListener("change", () => {
@@ -101,6 +103,11 @@ export class TerminalPanel {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // `yonder FILE` in the shell prints ESC ] 7777 ; open ; PATH BEL.
+    term.parser.registerOscHandler(7777, (data) => {
+      if (data.startsWith("open;/")) this.onOpen(data.slice("open;".length));
+      return true;
+    });
     // Let the show/hide shortcut through instead of sending it to the shell.
     term.attachCustomKeyEventHandler((e) => !(e.ctrlKey && e.key === "`"));
 

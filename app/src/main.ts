@@ -271,6 +271,7 @@ const terminals = new TerminalPanel(
   $("term-tabs"),
   $("term-body"),
   () => conn?.root ?? null,
+  (path) => void editors.open(path),
 );
 
 $("toggle-terminal").addEventListener("click", () => terminals.toggle());

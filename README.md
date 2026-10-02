@@ -40,6 +40,9 @@ dialog. Cancel ends that login attempt.
   prints endlessly is paused rather than flooding the window, so
   <kbd>Ctrl</kbd>+<kbd>C</kbd> always answers at once. Terminals end with the
   connection; use `tmux` inside one if a session must survive.
+- **`yonder FILE`** in a Yonder terminal opens the file in this window. If
+  your login files reset `PATH`, add `~/.cache/yonder/bin` back to it; inside
+  `tmux`, it needs `set -g allow-passthrough on`.
 - **Lost connection:** open files and unsaved edits stay, and Yonder
   reconnects on its own: after 1, 2, 5, 10, 20, then every 30 seconds, and at
   once when the Mac comes back online. It stops when a person is needed (a
