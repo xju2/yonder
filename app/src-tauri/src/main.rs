@@ -729,6 +729,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+B")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("markdown-preview", "Toggle Markdown Preview")
+                .accelerator("CmdOrCtrl+Shift+V")
+                .build(app)?,
+        )
         .build()?;
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
@@ -777,7 +782,7 @@ fn main() {
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" if request_quit(app) => app.exit(0),
-            id @ ("go-to-file" | "close-tab" | "toggle-sidebar") => {
+            id @ ("go-to-file" | "close-tab" | "toggle-sidebar" | "markdown-preview") => {
                 let _ = app.emit("menu", id);
             }
             _ => {}

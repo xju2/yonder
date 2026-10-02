@@ -295,6 +295,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 #viewer { flex: 1; min-height: 0; display: flex; }
 #diff { flex: 1; min-height: 0; }
+.md-preview { flex: 1; border: none; background: var(--bg); }
 .viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .viewer-toolbar {
   display: flex;

@@ -228,6 +228,7 @@ void api.onMenu((id) => {
   if (!conn || workspace.hidden) return;
   if (id === "go-to-file") void finder.open();
   else if (id === "toggle-sidebar") toggleSidebar();
+  else if (id === "markdown-preview") editors.togglePreview();
   // Cmd+W closes the terminal that has the keyboard, else the editor tab.
   else if (id === "close-tab" && !terminals.closeFocused()) editors.closeActive();
 });

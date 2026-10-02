@@ -7,6 +7,7 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import { marked } from "marked";
 import { asError, gitDiff, readBytes, readFile, stat, writeFile } from "./api";
 import type { DiffRequest } from "./git";
 import { ask, tell } from "./modal";
@@ -62,6 +63,24 @@ function languageFor(path: string): string {
   return best;
 }
 
+/** Markdown preview styles; the preview's frame does not see the app's. */
+const PREVIEW_CSS = `
+:root { color-scheme: light dark; }
+body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  max-width: 820px; margin: 0 auto; padding: 16px 32px 48px; }
+pre, code { font: 12.5px "SF Mono", Menlo, Monaco, monospace; background: rgb(127 127 127 / 0.12); border-radius: 4px; }
+code { padding: 1px 4px; }
+pre { padding: 10px 12px; overflow: auto; }
+pre code { padding: 0; background: none; }
+img { max-width: 100%; }
+table { border-collapse: collapse; }
+th, td { border: 1px solid rgb(127 127 127 / 0.35); padding: 4px 10px; }
+blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgb(127 127 127 / 0.4); opacity: 0.85; }
+h1, h2 { border-bottom: 1px solid rgb(127 127 127 / 0.25); padding-bottom: 4px; }
+`;
+
+const isMarkdown = (path: string) => /\.(md|markdown|mdown|mkd)$/i.test(path);
+
 export const baseName = (path: string) => path.split("/").pop() || path;
 
 interface Tab {
@@ -84,6 +103,8 @@ interface Tab {
   diff: { original: monaco.editor.ITextModel; modified: monaco.editor.ITextModel } | null;
   /** Tab title when it is not the file name. */
   label: string | null;
+  /** Rendered Markdown, shown instead of the text while set. */
+  preview: HTMLIFrameElement | null;
 }
 
 export class Editors {
@@ -161,6 +182,7 @@ export class Editors {
       loading: null,
       diff: null,
       label: null,
+      preview: null,
     };
     if (file.text === null) {
       tab.note = `${baseName(path)} is not a text file (${file.size.toLocaleString()} bytes).`;
@@ -208,6 +230,7 @@ export class Editors {
       loading: null,
       diff: null,
       label: null,
+      preview: null,
     };
     const viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
     tab.viewer = viewer;
@@ -271,6 +294,7 @@ export class Editors {
       loading: null,
       diff: null,
       label: req.rev ? `${name} @ ${req.short}` : `${name} (changes)`,
+      preview: null,
     };
     this.setDiff(tab, name, lang, d.original, d.modified);
     this.buildTab(tab);
@@ -450,6 +474,27 @@ export class Editors {
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
   }
 
+  /** Switch the active Markdown tab between its text and a rendered view. */
+  togglePreview() {
+    const tab = this.active;
+    if (!tab?.model || !isMarkdown(tab.path)) return;
+    if (tab.preview) {
+      tab.preview = null;
+    } else {
+      const frame = document.createElement("iframe");
+      frame.className = "md-preview";
+      // No scripts and an opaque origin: a remote file's HTML cannot reach
+      // the app's commands.
+      frame.sandbox.value = "";
+      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>${PREVIEW_CSS}</style>${marked.parse(
+        tab.model.getValue(),
+        { async: false },
+      )}`;
+      tab.preview = frame;
+    }
+    this.show(tab);
+  }
+
   closeActive() {
     if (this.active) void this.close(this.active);
   }
@@ -492,22 +537,25 @@ export class Editors {
     const hasText = !!tab?.model;
     const viewer = tab?.viewer ?? null;
     const diff = tab?.diff ?? null;
+    const preview = tab?.preview ?? null;
     this.host.style.visibility = hasText ? "visible" : "hidden";
-    this.host.style.display = viewer || diff ? "none" : "";
+    this.host.style.display = viewer || diff || preview ? "none" : "";
     this.diffHost.hidden = !diff;
     if (diff) {
       this.getDiffEditor().setModel(diff);
       this.position("");
     }
-    this.viewerHost.hidden = !viewer;
-    if (viewer) this.viewerHost.replaceChildren(viewer.el);
-    else this.viewerHost.replaceChildren();
+    this.viewerHost.hidden = !viewer && !preview;
+    const shown = viewer?.el ?? preview;
+    // Re-attaching a frame reloads it; leave one that is already showing.
+    if (!shown) this.viewerHost.replaceChildren();
+    else if (this.viewerHost.firstChild !== shown) this.viewerHost.replaceChildren(shown);
     this.placeholder.hidden = hasText || !!viewer || !!diff;
     this.placeholder.textContent = tab ? tab.note : "Open a file from the tree.";
     this.editor.setModel(tab?.model ?? null);
     if (tab?.model) {
       if (tab.view) this.editor.restoreViewState(tab.view);
-      this.editor.focus();
+      if (!preview) this.editor.focus();
     }
     if (viewer) {
       this.position(viewer.info());
