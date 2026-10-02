@@ -58,6 +58,16 @@ export const connect = (host: string, path: string) =>
 export const disconnect = () => invoke<void>("disconnect");
 export const listDir = (path: string) => invoke<Entry[]>("list_dir", { path });
 export const readFile = (path: string) => invoke<FileContent>("read_file", { path });
+/** Raw bytes, for the image and PDF viewers. */
+export const readBytes = (path: string) => invoke<ArrayBuffer>("read_bytes", { path });
+
+export interface Stat {
+  size: number;
+  /** Changes whenever the file's size or modification time does. */
+  version: string;
+}
+export const stat = (path: string) => invoke<Stat>("stat", { path });
+
 export const writeFile = (path: string, text: string, expectedHash: string | null) =>
   invoke<Written>("write_file", { path, text, expectedHash });
 

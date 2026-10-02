@@ -107,6 +107,7 @@ function showBanner(text: string) {
 const tree = new FileTree($("tree"), (path) => void editors.open(path));
 const editors = new Editors(
   $("editor"),
+  $("viewer"),
   $("tabs"),
   $("placeholder"),
   (msg) => status(msg),
@@ -191,7 +192,9 @@ $("refresh-tree").addEventListener("click", () => void tree.refresh());
 // Refreshing on focus catches files written by batch jobs or other machines,
 // which file-change notifications miss on network filesystems.
 window.addEventListener("focus", () => {
-  if (conn && !workspace.hidden) void tree.refresh();
+  if (!conn || workspace.hidden) return;
+  void tree.refresh();
+  editors.refreshActive();
 });
 
 // ---- sidebar width
