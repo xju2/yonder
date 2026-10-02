@@ -77,6 +77,8 @@ interface Tab {
   viewer: Viewer | null;
   /** The remote file's size and mtime when the viewer last loaded it. */
   version: string | null;
+  /** The viewer's pending load or reload; the next one waits for it. */
+  loading: Promise<void> | null;
 }
 
 export class Editors {
@@ -147,6 +149,7 @@ export class Editors {
       el: document.createElement("div"),
       viewer: null,
       version: null,
+      loading: null,
     };
     if (file.text === null) {
       tab.note = `${baseName(path)} is not a text file (${file.size.toLocaleString()} bytes).`;
@@ -191,22 +194,31 @@ export class Editors {
       el: document.createElement("div"),
       viewer: null,
       version,
+      loading: null,
     };
-    tab.viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
+    const viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
+    tab.viewer = viewer;
+    // Reloads requested while the first load runs wait for it.
+    let firstLoaded!: () => void;
+    const first = new Promise<void>((resolve) => (firstLoaded = resolve));
+    tab.loading = first;
     this.buildTab(tab);
     this.tabs.push(tab);
     // Show first: fitting a PDF to the window needs the window's size.
     this.show(tab);
     try {
-      await tab.viewer.load(bytes);
+      await viewer.load(bytes);
       this.status("");
-      if (this.active === tab) this.position(tab.viewer.info());
+      if (this.active === tab) this.position(viewer.info());
     } catch (e) {
-      tab.viewer.dispose();
+      viewer.dispose();
       tab.viewer = null;
       tab.note = `Could not show ${name}: ${e instanceof Error ? e.message : String(e)}`;
       this.status("");
       if (this.active === tab) this.show(tab);
+    } finally {
+      if (tab.loading === first) tab.loading = null;
+      firstLoaded();
     }
   }
 
@@ -215,7 +227,23 @@ export class Editors {
     if (this.active?.viewer) void this.refreshViewer(this.active);
   }
 
-  private async refreshViewer(tab: Tab, force = false) {
+  /**
+   * Reload the tab's viewer if its file changed (always, with `force`).
+   * One load per tab at a time, so an older file never replaces a newer one;
+   * a check requested while another is queued joins it.
+   */
+  private refreshViewer(tab: Tab, force = false): Promise<void> {
+    if (tab.loading && !force) return tab.loading;
+    const next: Promise<void> = (tab.loading ?? Promise.resolve())
+      .then(() => this.reloadIfChanged(tab, force))
+      .finally(() => {
+        if (tab.loading === next) tab.loading = null;
+      });
+    tab.loading = next;
+    return next;
+  }
+
+  private async reloadIfChanged(tab: Tab, force: boolean) {
     const viewer = tab.viewer;
     if (!viewer) return;
     const name = baseName(tab.path);
@@ -228,7 +256,8 @@ export class Editors {
       if (this.active === tab) this.position(viewer.info());
       this.status(`Reloaded ${name}`);
     } catch (e) {
-      const err = asError(e);
+      // The previous content stays on screen; the next check tries again.
+      const err = e instanceof Error ? { kind: "other", message: e.message } : asError(e);
       if (err.kind === "not_found") this.status(`${name} no longer exists on the remote.`);
       else if (err.kind !== "disconnected") this.status(`Could not reload ${name}: ${err.message}`);
     }

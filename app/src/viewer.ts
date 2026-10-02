@@ -44,6 +44,8 @@ function button(label: string, title: string, onClick: () => void): HTMLButtonEl
   const b = document.createElement("button");
   b.textContent = label;
   b.title = title;
+  // The visible label may be a bare symbol (−, +, ↻); give it a spoken name.
+  b.setAttribute("aria-label", title);
   b.addEventListener("click", onClick);
   return b;
 }
@@ -58,6 +60,31 @@ function toolbar(info: HTMLElement, ...controls: HTMLElement[]): HTMLElement {
 }
 
 // ---- images
+
+/**
+ * Whether an image file has its end marker. Browsers happily draw a
+ * truncated PNG as a blank or partial picture, so decoding alone cannot tell
+ * that a job is still writing it.
+ */
+export function looksComplete(bytes: Uint8Array, ext: string): boolean {
+  const n = bytes.length;
+  const tail = (k: number) => bytes.subarray(Math.max(0, n - k));
+  switch (ext) {
+    case "png": // the last chunk is IEND, followed by its 4-byte CRC
+      return n >= 12 && String.fromCharCode(...tail(8).subarray(0, 4)) === "IEND";
+    case "jpg":
+    case "jpeg": {
+      // End-of-image marker, sometimes followed by a few bytes of padding.
+      const t = tail(16);
+      for (let i = 0; i + 1 < t.length; i++) if (t[i] === 0xff && t[i + 1] === 0xd9) return true;
+      return false;
+    }
+    case "gif": // trailer byte
+      return n > 0 && bytes[n - 1] === 0x3b;
+    default:
+      return true;
+  }
+}
 
 class ImageViewer implements Viewer {
   readonly el = document.createElement("div");
@@ -90,26 +117,34 @@ class ImageViewer implements Viewer {
     this.fitBtn.textContent = fit ? "Actual size" : "Fit";
   }
 
+  private size = "";
+
   async load(bytes: ArrayBuffer) {
-    const type = IMAGE_TYPES[extension(this.path)] ?? "application/octet-stream";
-    const url = URL.createObjectURL(new Blob([bytes], { type }));
-    const loaded = new Promise<void>((resolve, reject) => {
-      this.img.onload = () => resolve();
-      this.img.onerror = () => reject(new Error("the image could not be decoded"));
-    });
-    this.img.src = url;
-    try {
-      await loaded;
-    } finally {
-      if (this.url) URL.revokeObjectURL(this.url);
-      this.url = url;
+    const ext = extension(this.path);
+    if (!looksComplete(new Uint8Array(bytes), ext)) {
+      throw new Error("the file looks incomplete; it may still be being written");
     }
-    this.infoEl.textContent = this.info();
+    const type = IMAGE_TYPES[ext] ?? "application/octet-stream";
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    // Decode off-screen first: a plot caught half-written must not replace
+    // the last good picture.
+    const probe = new Image();
+    probe.src = url;
+    try {
+      await probe.decode();
+    } catch {
+      URL.revokeObjectURL(url);
+      throw new Error("the image could not be decoded");
+    }
+    this.img.src = url;
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = url;
+    this.size = `${probe.naturalWidth} × ${probe.naturalHeight} px`;
+    this.infoEl.textContent = this.size;
   }
 
   info() {
-    const { naturalWidth: w, naturalHeight: h } = this.img;
-    return w ? `${w} × ${h} px` : "";
+    return this.size;
   }
 
   dispose() {
@@ -188,7 +223,10 @@ class PdfViewer implements Viewer {
     this.resize.observe(this.pagesEl);
   }
 
+  private loads = 0;
+
   async load(bytes: ArrayBuffer) {
+    const load = ++this.loads;
     const pdfjs = await loadPdfJs();
     const doc = await pdfjs.getDocument({
       data: new Uint8Array(bytes),
@@ -198,6 +236,11 @@ class PdfViewer implements Viewer {
       wasmUrl: assets("wasm"),
       iccUrl: assets("iccs"),
     }).promise;
+    // A newer load started while this one parsed; it wins.
+    if (load !== this.loads) {
+      void doc.loadingTask.destroy();
+      return;
+    }
     // Keep the reading position across reloads of a regenerated file.
     const ratio = this.pagesEl.scrollHeight
       ? this.pagesEl.scrollTop / this.pagesEl.scrollHeight
@@ -215,10 +258,14 @@ class PdfViewer implements Viewer {
     return n ? `${n} page${n === 1 ? "" : "s"}` : "";
   }
 
+  /** The next preset zoom above (dir > 0) or below the current scale. */
   private step(dir: number) {
-    const i = ZOOMS.findIndex((z) => z >= this.scale - 0.001);
-    const next = ZOOMS[Math.min(Math.max((i < 0 ? ZOOMS.length : i) + dir, 0), ZOOMS.length - 1)];
-    this.setZoom(next);
+    const eps = 0.005;
+    const next =
+      dir > 0
+        ? ZOOMS.find((z) => z > this.scale + eps)
+        : [...ZOOMS].reverse().find((z) => z < this.scale - eps);
+    if (next !== undefined) this.setZoom(next);
   }
 
   private setZoom(zoom: number | null) {
