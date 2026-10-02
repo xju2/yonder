@@ -8,13 +8,16 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{ipc::Response, AppHandle, Emitter, Manager, State};
 use yonder_client::{connect as open_connection, ConnectOptions, Connection, Level, LogLine};
 use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Op, Reply};
 
 /// Text files larger than this are refused: the editor gets sluggish well
 /// before, and such files are rarely meant to be edited by hand.
 const MAX_OPEN_BYTES: u64 = 16 << 20;
+
+/// Images and PDFs are shown, not edited, so they may be larger.
+const MAX_VIEW_BYTES: u64 = 128 << 20;
 
 #[derive(Default)]
 struct AppState {
@@ -247,6 +250,38 @@ async fn read_file(state: State<'_, AppState>, path: String) -> Result<FileOut, 
     }
 }
 
+/// The raw bytes of a file, for the image and PDF viewers. Sent as binary,
+/// not JSON, so a 20 MB PDF does not become an 80 MB array of numbers.
+#[tauri::command]
+async fn read_bytes(state: State<'_, AppState>, path: String) -> Result<Response, CmdError> {
+    let op = Op::ReadFile {
+        path,
+        max_bytes: MAX_VIEW_BYTES,
+    };
+    match state.current()?.call(op).await? {
+        Reply::File { data, .. } => Ok(Response::new(data)),
+        other => Err(unexpected(other)),
+    }
+}
+
+#[derive(Serialize)]
+struct StatOut {
+    size: u64,
+    /// Changes whenever the size or modification time does.
+    version: String,
+}
+
+#[tauri::command]
+async fn stat(state: State<'_, AppState>, path: String) -> Result<StatOut, CmdError> {
+    match state.current()?.call(Op::Stat { path }).await? {
+        Reply::Stat(s) => Ok(StatOut {
+            size: s.size,
+            version: format!("{}:{}.{:09}", s.size, s.mtime_s, s.mtime_ns),
+        }),
+        other => Err(unexpected(other)),
+    }
+}
+
 #[derive(Serialize)]
 struct WrittenOut {
     hash: String,
@@ -288,7 +323,7 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
-            connect, disconnect, list_dir, read_file, write_file
+            connect, disconnect, list_dir, read_file, read_bytes, stat, write_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Yonder");

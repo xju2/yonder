@@ -6,7 +6,7 @@ Typing never waits on the network: files are edited locally and only saving
 goes to the remote. Nothing is left running, locked, or half-installed on the
 remote, and when a connection fails Yonder tells you which step failed and why.
 
-**Status:** milestone 1 of 5 — connect, browse, edit and save. See the
+**Status:** connect, browse, edit and save; view images and PDFs. See the
 [roadmap](#roadmap).
 
 ## Using it
@@ -29,6 +29,9 @@ ssh -o BatchMode=yes <host> true
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
   where file-change notifications miss writes from other machines.
+- **Images and PDFs** (PNG, JPEG, GIF, WebP, SVG, PDF, …) open in a viewer.
+  When you come back to the window, or press ↻, a file that changed on the
+  remote (a regenerated plot, say) is reloaded, keeping zoom and position.
 - **Lost connection:** open files and unsaved edits stay; press Reconnect.
 
 ## How it works
@@ -59,7 +62,7 @@ ownership survive.
 | `crates/agent` | `yonder-agent`, the remote side |
 | `crates/client` | Starts the agent over ssh; request routing |
 | `app/src-tauri` | Desktop process: Tauri commands over the client |
-| `app/src` | UI: file tree, tabs, Monaco editor |
+| `app/src` | UI: file tree, tabs, Monaco editor, image and PDF viewers ([pdf.js](https://mozilla.github.io/pdf.js/)) |
 
 ## Building
 
@@ -107,8 +110,8 @@ agent through a stand-in for `ssh`.
 1. **Connect and edit** — done.
 2. **Watching and terminal:** periodic re-listing of open folders and open
    files; terminal tabs.
-3. **Git and viewers:** changed files with diffs, commit history, PDF and
-   PNG viewers.
+3. **Git and viewers:** changed files with diffs, commit history. Image and
+   PDF viewers are done.
 4. **Hardening:** automatic reconnect, password and MFA prompts, large-file
    handling, signing.
 5. **AI suggestions (optional):** propose small edits, shown as a diff to

@@ -7,8 +7,9 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
-import { asError, readFile, writeFile } from "./api";
+import { asError, readBytes, readFile, stat, writeFile } from "./api";
 import { ask, tell } from "./modal";
+import { createViewer, viewKindFor, type ViewKind, type Viewer } from "./viewer";
 
 self.MonacoEnvironment = {
   getWorker(_id: string, label: string) {
@@ -72,6 +73,12 @@ interface Tab {
   savedVersion: number;
   view: monaco.editor.ICodeEditorViewState | null;
   el: HTMLElement;
+  /** Image or PDF viewer, for files that are shown rather than edited. */
+  viewer: Viewer | null;
+  /** The remote file's size and mtime when the viewer last loaded it. */
+  version: string | null;
+  /** The viewer's pending load or reload; the next one waits for it. */
+  loading: Promise<void> | null;
 }
 
 export class Editors {
@@ -81,11 +88,12 @@ export class Editors {
 
   constructor(
     private host: HTMLElement,
+    private viewerHost: HTMLElement,
     private tabsEl: HTMLElement,
     private placeholder: HTMLElement,
     private status: (msg: string) => void,
     private onActive: (path: string | null) => void,
-    position: (text: string) => void,
+    private position: (text: string) => void,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -99,7 +107,7 @@ export class Editors {
     applyTheme();
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save());
     this.editor.onDidChangeCursorPosition((e) =>
-      position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`),
+      this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`),
     );
     this.show(null);
   }
@@ -111,6 +119,8 @@ export class Editors {
   async open(path: string) {
     const existing = this.tabs.find((t) => t.path === path);
     if (existing) return this.show(existing);
+    const kind = viewKindFor(path);
+    if (kind) return this.openViewer(path, kind);
     this.status(`Opening ${baseName(path)}…`);
     let file;
     try {
@@ -137,6 +147,9 @@ export class Editors {
       savedVersion: 0,
       view: null,
       el: document.createElement("div"),
+      viewer: null,
+      version: null,
+      loading: null,
     };
     if (file.text === null) {
       tab.note = `${baseName(path)} is not a text file (${file.size.toLocaleString()} bytes).`;
@@ -151,6 +164,103 @@ export class Editors {
     this.tabs.push(tab);
     this.status("");
     this.show(tab);
+  }
+
+  private async openViewer(path: string, kind: ViewKind) {
+    const name = baseName(path);
+    this.status(`Opening ${name}…`);
+    let version: string;
+    let bytes: ArrayBuffer;
+    try {
+      version = (await stat(path)).version;
+      bytes = await readBytes(path);
+    } catch (e) {
+      const err = asError(e);
+      this.status("");
+      const what = err.kind === "too_large" ? `${name} is too large to view.` : `Could not open ${name}.`;
+      await tell(what, err.message);
+      return;
+    }
+    const raced = this.tabs.find((t) => t.path === path);
+    if (raced) return this.show(raced);
+
+    const tab: Tab = {
+      path,
+      model: null,
+      note: "",
+      hash: null,
+      savedVersion: 0,
+      view: null,
+      el: document.createElement("div"),
+      viewer: null,
+      version,
+      loading: null,
+    };
+    const viewer = createViewer(kind, path, () => void this.refreshViewer(tab, true));
+    tab.viewer = viewer;
+    // Reloads requested while the first load runs wait for it.
+    let firstLoaded!: () => void;
+    const first = new Promise<void>((resolve) => (firstLoaded = resolve));
+    tab.loading = first;
+    this.buildTab(tab);
+    this.tabs.push(tab);
+    // Show first: fitting a PDF to the window needs the window's size.
+    this.show(tab);
+    try {
+      await viewer.load(bytes);
+      this.status("");
+      if (this.active === tab) this.position(viewer.info());
+    } catch (e) {
+      viewer.dispose();
+      tab.viewer = null;
+      tab.note = `Could not show ${name}: ${e instanceof Error ? e.message : String(e)}`;
+      this.status("");
+      if (this.active === tab) this.show(tab);
+    } finally {
+      if (tab.loading === first) tab.loading = null;
+      firstLoaded();
+    }
+  }
+
+  /** Re-check the active image or PDF and reload it if it changed on the remote. */
+  refreshActive() {
+    if (this.active?.viewer) void this.refreshViewer(this.active);
+  }
+
+  /**
+   * Reload the tab's viewer if its file changed (always, with `force`).
+   * One load per tab at a time, so an older file never replaces a newer one;
+   * a check requested while another is queued joins it.
+   */
+  private refreshViewer(tab: Tab, force = false): Promise<void> {
+    if (tab.loading && !force) return tab.loading;
+    const next: Promise<void> = (tab.loading ?? Promise.resolve())
+      .then(() => this.reloadIfChanged(tab, force))
+      .finally(() => {
+        if (tab.loading === next) tab.loading = null;
+      });
+    tab.loading = next;
+    return next;
+  }
+
+  private async reloadIfChanged(tab: Tab, force: boolean) {
+    const viewer = tab.viewer;
+    if (!viewer) return;
+    const name = baseName(tab.path);
+    try {
+      const s = await stat(tab.path);
+      if (!force && s.version === tab.version) return;
+      const bytes = await readBytes(tab.path);
+      await viewer.load(bytes);
+      tab.version = s.version;
+      if (this.active === tab) this.position(viewer.info());
+      this.status(`Reloaded ${name}`);
+    } catch (e) {
+      // The previous content stays on screen; the next check tries again.
+      const err = e instanceof Error ? { kind: "other", message: e.message } : asError(e);
+      if (err.kind === "not_found") this.status(`${name} no longer exists on the remote.`);
+      else if (err.kind !== "disconnected") this.status(`Could not reload ${name}: ${err.message}`);
+    }
   }
 
   /** Save the active tab, resolving conflicts with the person. */
@@ -229,6 +339,7 @@ export class Editors {
     this.tabs.splice(i, 1);
     tab.el.remove();
     tab.model?.dispose();
+    tab.viewer?.dispose();
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
   }
 
@@ -268,15 +379,25 @@ export class Editors {
     this.active = tab;
     this.tabs.forEach((t) => this.paintTab(t));
     const hasText = !!tab?.model;
+    const viewer = tab?.viewer ?? null;
     this.host.style.visibility = hasText ? "visible" : "hidden";
-    this.placeholder.hidden = hasText;
+    this.host.style.display = viewer ? "none" : "";
+    this.viewerHost.hidden = !viewer;
+    if (viewer) this.viewerHost.replaceChildren(viewer.el);
+    else this.viewerHost.replaceChildren();
+    this.placeholder.hidden = hasText || !!viewer;
     this.placeholder.textContent = tab ? tab.note : "Open a file from the tree.";
     this.editor.setModel(tab?.model ?? null);
     if (tab?.model) {
       if (tab.view) this.editor.restoreViewState(tab.view);
       this.editor.focus();
-      tab.el.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
+    if (viewer) {
+      this.position(viewer.info());
+      // A plot may have been regenerated while another tab was showing.
+      void this.refreshViewer(tab!);
+    }
+    tab?.el.scrollIntoView({ block: "nearest", inline: "nearest" });
     this.onActive(tab?.path ?? null);
   }
 }

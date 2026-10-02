@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -33,6 +33,11 @@ pub enum Op {
         path: String,
     },
     ListDir {
+        path: String,
+    },
+    /// Size and modification time, following symlinks. Lets viewers notice a
+    /// regenerated plot without downloading it again.
+    Stat {
         path: String,
     },
     /// Fails with [`ErrorKind::TooLarge`] if the file exceeds `max_bytes`.
@@ -73,6 +78,7 @@ pub enum Reply {
         is_dir: bool,
     },
     Entries(Vec<Entry>),
+    Stat(FileStat),
     File {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,

@@ -13,6 +13,7 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
         Op::Hello => Ok(Reply::Hello(hello())),
         Op::Resolve { path } => resolve(&path),
         Op::ListDir { path } => list_dir(Path::new(&path)).map(Reply::Entries),
+        Op::Stat { path } => Ok(Reply::Stat(stat_of(&fs::metadata(path)?))),
         Op::ReadFile { path, max_bytes } => read_file(Path::new(&path), max_bytes),
         Op::WriteFile {
             path,
@@ -396,6 +397,24 @@ mod tests {
         let entries = list_dir(d.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, EntryKind::Other);
+    }
+
+    #[test]
+    fn stat_follows_symlinks() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("plot.png"), "12345").unwrap();
+        symlink(d.path().join("plot.png"), d.path().join("latest.png")).unwrap();
+        let op = Op::Stat {
+            path: d.path().join("latest.png").to_string_lossy().into(),
+        };
+        let Ok(Reply::Stat(stat)) = handle(op) else {
+            panic!()
+        };
+        assert_eq!(stat.size, 5);
+        let op = Op::Stat {
+            path: d.path().join("nope").to_string_lossy().into(),
+        };
+        assert_eq!(handle(op).unwrap_err().kind, ErrorKind::NotFound);
     }
 
     #[test]
