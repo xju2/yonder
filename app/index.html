@@ -57,12 +57,18 @@
         </section>
       </main>
       <footer id="status">
+        <button id="toggle-sidebar" title="Show or hide the sidebar (⌘B)" aria-label="Show or hide the sidebar">◧</button>
         <span id="status-conn"></span>
         <span id="status-msg"></span>
         <span id="status-pos"></span>
         <button id="toggle-terminal" title="Show or hide terminals (Ctrl+`)">Terminal</button>
       </footer>
     </section>
+
+    <dialog id="finder" aria-label="Go to file">
+      <input id="finder-input" placeholder="Go to file…" aria-controls="finder-list" autocomplete="off" spellcheck="false" />
+      <ul id="finder-list" role="listbox"></ul>
+    </dialog>
 
     <dialog id="modal">
       <form method="dialog">

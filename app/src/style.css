@@ -200,7 +200,8 @@ button:disabled { opacity: 0.6; cursor: default; }
 #tree ul.tree-root > li > .row { display: none; }
 #tree .row {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 3px;
   padding: 1px 8px 1px 4px;
   white-space: nowrap;
   cursor: default;
@@ -210,9 +211,22 @@ button:disabled { opacity: 0.6; cursor: default; }
 #tree .row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 #tree .row.active { background: var(--bg-active); }
 #tree .row.dotfile, #tree .row.broken, #tree .row.other { color: var(--fg-dim); }
+#tree .icon { width: 16px; flex: none; display: grid; place-items: center; color: var(--fg-dim); }
+#tree .icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linejoin: round; }
+#tree .dir > .icon { color: #5f8fc4; }
+#tree .icon.t-code { color: #8a6fd1; }
+#tree .icon.t-data { color: #c08a2c; }
+#tree .icon.t-doc { color: #4b9a8a; }
+#tree .icon.t-media { color: #c45a8a; }
+#tree .row.git-modified .label { color: #b07d0e; }
+#tree .row.git-untracked .label { color: #3fa65a; }
+#tree .row.git-ignored { opacity: 0.5; }
 #tree .twisty { width: 14px; flex: none; text-align: center; color: var(--fg-dim); }
 #tree .label { overflow: hidden; text-overflow: ellipsis; }
 #tree .note { color: var(--fg-dim); font-style: italic; padding: 1px 0 1px 22px; }
+
+#workspace.sidebar-hidden { grid-template-columns: 1fr; }
+#workspace.sidebar-hidden #sidebar, #workspace.sidebar-hidden #sash { display: none; }
 
 #sash { cursor: col-resize; background: var(--border); background-clip: content-box; padding: 0 1.5px; }
 #sash:hover { background-color: var(--accent); }
@@ -386,14 +400,15 @@ button:disabled { opacity: 0.6; cursor: default; }
 #term-body { flex: 1; min-height: 0; position: relative; background: var(--bg); }
 .term-view { position: absolute; inset: 4px 0 0 8px; }
 
-#toggle-terminal {
+#toggle-sidebar { font-size: 14px; margin-left: -4px; }
+#toggle-terminal, #toggle-sidebar {
   border: none;
   background: none;
   padding: 0 6px;
   font-size: 12px;
   color: var(--fg-dim);
 }
-#toggle-terminal:hover { background: var(--bg-hover); color: var(--fg); }
+#toggle-terminal:hover, #toggle-sidebar:hover { background: var(--bg-hover); color: var(--fg); }
 
 #status {
   grid-column: 1 / -1;
@@ -411,6 +426,36 @@ button:disabled { opacity: 0.6; cursor: default; }
 #status-conn::before { content: "● "; color: #3fa65a; }
 #status-conn.down::before { color: var(--danger); }
 #status-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- go to file */
+
+#finder {
+  margin: 12vh auto auto;
+  padding: 0;
+  width: min(560px, 90vw);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+}
+#finder::backdrop { background: transparent; }
+#finder-input {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  font: 14px var(--mono);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--fg);
+  outline: none;
+}
+#finder-list { list-style: none; margin: 0; padding: 4px 0; max-height: 50vh; overflow: auto; }
+#finder-list li { display: flex; align-items: baseline; gap: 8px; padding: 3px 12px; white-space: nowrap; cursor: default; }
+#finder-list li .dir { color: var(--fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+#finder-list li[aria-selected="true"] { background: var(--bg-active); }
+#finder-list li.note { color: var(--fg-dim); font-style: italic; }
 
 /* ---- dialog */
 

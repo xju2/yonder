@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { Editors } from "./editor";
+import { Finder } from "./finder";
 import { GitPanel } from "./git";
 import { ask, askText } from "./modal";
 import { TerminalPanel } from "./terminal";
@@ -180,6 +181,7 @@ async function reconnectNow() {
     // The folder may resolve differently now (a moved symlink, say).
     if (info.root === oldRoot) await tree.refresh();
     else await tree.setRoot(info.root);
+    void git.refreshChanges();
     status(`Reconnected to ${info.host}`);
   } catch (err) {
     const ce = api.asError(err);
@@ -211,7 +213,24 @@ const editors = new Editors(
   (msg) => status(msg),
   (path) => tree.setActive(path),
   (pos) => ($("status-pos").textContent = pos),
+  () => void git.refreshChanges(),
 );
+const finder = new Finder(
+  () => (conn && !workspace.hidden ? conn.root : null),
+  (path) => void editors.open(path),
+);
+
+const toggleSidebar = () => workspace.classList.toggle("sidebar-hidden");
+$("toggle-sidebar").addEventListener("click", toggleSidebar);
+
+// Menu items, so their shortcuts work wherever the keyboard is.
+void api.onMenu((id) => {
+  if (!conn || workspace.hidden) return;
+  if (id === "go-to-file") void finder.open();
+  else if (id === "toggle-sidebar") toggleSidebar();
+  // Cmd+W closes the terminal that has the keyboard, else the editor tab.
+  else if (id === "close-tab" && !terminals.closeFocused()) editors.closeActive();
+});
 const terminals = new TerminalPanel(
   $("terminal-panel"),
   $("panel-sash"),
@@ -273,6 +292,7 @@ form.addEventListener("submit", async (e) => {
     saveRecent(target);
     await startSession(info);
     await tree.setRoot(info.root);
+    void git.refreshChanges();
   } catch (err) {
     const ce = api.asError(err);
     connectError.replaceChildren();
@@ -293,7 +313,10 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
-$("refresh-tree").addEventListener("click", () => void tree.refresh());
+$("refresh-tree").addEventListener("click", () => {
+  void tree.refresh();
+  void git.refreshChanges();
+});
 
 // Refreshing on focus catches files written by batch jobs or other machines,
 // which file-change notifications miss on network filesystems.
@@ -301,7 +324,8 @@ window.addEventListener("focus", () => {
   if (!conn || workspace.hidden) return;
   void tree.refresh();
   editors.refreshActive();
-  if (sideView === "changes") void git.refreshChanges();
+  // Also recolours the tree, so it runs whichever view is showing.
+  void git.refreshChanges();
 });
 
 // ---- sidebar views: Files, Changes, History
@@ -313,6 +337,7 @@ const git = new GitPanel(
   $("history-view"),
   () => conn?.root ?? null,
   (req) => void editors.openDiff(req),
+  (repo, status) => tree.setGit(repo, status),
 );
 
 async function showSideView(view: SideView) {
@@ -396,20 +421,24 @@ sash.addEventListener("pointerdown", (e) => {
 
 let askingToQuit = false;
 async function confirmQuit() {
-  if (!editors.hasUnsaved()) return api.quitApp();
   // Cmd+Q pressed twice should not stack two questions.
   if (askingToQuit) return;
   askingToQuit = true;
-  const choice = await ask("Some files have unsaved changes.", [
-    { value: "cancel", label: "Keep editing", primary: true },
-    { value: "quit", label: "Quit without saving", danger: true },
-  ]);
+  const unsaved = editors.hasUnsaved();
+  const choice = await ask(
+    unsaved ? "Some files have unsaved changes." : "Quit Yonder?",
+    [
+      { value: "cancel", label: unsaved ? "Keep editing" : "Cancel", primary: true },
+      { value: "quit", label: unsaved ? "Quit without saving" : "Quit", danger: unsaved },
+    ],
+    conn ? "Terminals on the remote will be closed." : undefined,
+  );
   askingToQuit = false;
   if (choice === "quit") await api.quitApp();
 }
 
-// Every quit (Cmd+Q, the Dock) is held until this answers, so the check
-// uses the editor's state at that moment.
+// Every quit (Cmd+Q, the Dock) is held until this answers: a stray Cmd+Q
+// would otherwise drop the connection and every terminal.
 void api.onQuitRequested(() => void confirmQuit());
 
 void getCurrentWindow().onCloseRequested(async (event) => {

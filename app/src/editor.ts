@@ -102,6 +102,7 @@ export class Editors {
     private status: (msg: string) => void,
     private onActive: (path: string | null) => void,
     private position: (text: string) => void,
+    private onSaved: () => void,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -382,6 +383,7 @@ export class Editors {
         tab.savedVersion = version;
         this.paintTab(tab);
         this.status(`Saved ${name}`);
+        this.onSaved();
         return;
       } catch (e) {
         const err = asError(e);
@@ -446,6 +448,10 @@ export class Editors {
     tab.viewer?.dispose();
     this.dropDiff(tab);
     if (this.active === tab) this.show(this.tabs[Math.min(i, this.tabs.length - 1)] ?? null);
+  }
+
+  closeActive() {
+    if (this.active) void this.close(this.active);
   }
 
   private isDirty(t: Tab) {

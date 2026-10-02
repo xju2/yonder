@@ -90,6 +90,8 @@ export class GitPanel {
     /** The open folder. */
     private dir: () => string | null,
     private openDiff: (req: DiffRequest) => void,
+    /** Each fresh `git status`, for the file tree's colours. */
+    private onStatus: (repo: string | null, status: api.GitStatus | null) => void,
   ) {}
 
   /** Forget everything; called when the folder or connection changes. */
@@ -149,6 +151,7 @@ export class GitPanel {
     if (session !== this.session) return;
     const { repo, status } = result;
     this.repo = repo;
+    this.onStatus(repo, status);
     const branch = !status
       ? "Changes"
       : status.branch

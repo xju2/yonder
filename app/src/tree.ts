@@ -1,7 +1,7 @@
 // The file tree. Folders load lazily when expanded; "refresh" re-lists only
 // the folders that are open, never the whole tree (cheap on Lustre and NFS).
 
-import { asError, listDir, type Entry } from "./api";
+import { asError, listDir, type Entry, type GitStatus } from "./api";
 
 /** Directories this large are truncated; the terminal is better for them. */
 const MAX_SHOWN = 5000;
@@ -21,6 +21,26 @@ interface Node {
   li: HTMLLIElement;
 }
 
+const svg = (d: string) => `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="${d}"/></svg>`;
+const ICONS = {
+  dir: svg("M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z"),
+  open: svg("M1.5 13.5v-10h4.5l1.5 1.5h5.5v2M1.5 13.5l2-6h11.5l-2 6z"),
+  file: svg("M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"),
+  link: svg("M6.5 9.5l3-3M7 4.5l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5l-1.5 1.5M9 11.5l-1.5 1.5a2.5 2.5 0 0 1-3.5-3.5l1.5-1.5"),
+};
+
+/** File types by extension, for the icon's colour. */
+const FILE_TYPES: Record<string, string> = {};
+for (const [type, exts] of Object.entries({
+  code: "c cc cpp cxx h hh hpp cu py pyx ipynb rs go js mjs ts tsx jsx java kt jl f f90 f95 for r m sh bash zsh fish pl lua rb swift scala",
+  data: "json jsonl yaml yml toml ini cfg conf csv tsv xml h5 hdf5 root npy npz parquet pkl sql lock",
+  doc: "md markdown txt rst tex bib org log",
+  media: "png jpg jpeg gif svg webp bmp tif tiff ico pdf eps",
+})) {
+  for (const ext of exts.split(" ")) FILE_TYPES[ext] = type;
+}
+const fileType = (name: string) => FILE_TYPES[name.split(".").pop()!.toLowerCase()] ?? "plain";
+
 export const joinPath = (dir: string, name: string) =>
   dir.endsWith("/") ? dir + name : `${dir}/${name}`;
 
@@ -28,6 +48,10 @@ export class FileTree {
   private root: Node | null = null;
   private active: string | null = null;
   private refreshing: Promise<void> | null = null;
+  /** Git colour class by absolute path, for changed files and their folders. */
+  private marks = new Map<string, string>();
+  /** Absolute paths git ignores; folders cover everything below them. */
+  private ignored: string[] = [];
 
   constructor(
     private container: HTMLElement,
@@ -70,6 +94,36 @@ export class FileTree {
     await Promise.all(Array.from({ length: REFRESH_PARALLEL }, worker));
   }
 
+  /** Colour rows by `git status`: changed, untracked, or ignored. */
+  setGit(repo: string | null, status: GitStatus | null) {
+    this.marks.clear();
+    this.ignored = [];
+    if (repo && status) {
+      for (const c of status.files) {
+        if (c.status === "D") continue;
+        const cls = c.status === "?" ? "git-untracked" : "git-modified";
+        // The file, then each folder above it up to the repository.
+        let p = joinPath(repo, c.path);
+        while (p.length > repo.length) {
+          if (this.marks.get(p) !== "git-modified") this.marks.set(p, cls);
+          p = p.slice(0, p.lastIndexOf("/"));
+        }
+      }
+      this.ignored = status.ignored.map((p) => joinPath(repo, p.replace(/\/$/, "")));
+    }
+    for (const row of this.container.querySelectorAll<HTMLElement>(".row")) this.paintGit(row);
+  }
+
+  private paintGit(row: HTMLElement) {
+    const path = row.dataset.path!;
+    // ponytail: linear scan of ignored paths per row; a trie if repos ignore thousands
+    const cls =
+      this.marks.get(path) ??
+      (this.ignored.some((i) => path === i || path.startsWith(i + "/")) ? "git-ignored" : "");
+    row.classList.remove("git-modified", "git-untracked", "git-ignored");
+    if (cls) row.classList.add(cls);
+  }
+
   setActive(path: string | null) {
     this.active = path;
     this.container.querySelectorAll(".row.active").forEach((r) => r.classList.remove("active"));
@@ -99,10 +153,14 @@ export class FileTree {
     row.tabIndex = 0;
     const twisty = document.createElement("span");
     twisty.className = "twisty";
+    const icon = document.createElement("span");
+    icon.className = e.kind === "dir" ? "icon" : `icon t-${fileType(e.name)}`;
+    if (e.kind !== "dir") icon.innerHTML = e.kind === "broken" ? ICONS.link : ICONS.file;
     const label = document.createElement("span");
     label.className = "label";
     label.textContent = e.name + (e.symlink ? " ↗" : "");
-    row.append(twisty, label);
+    row.append(twisty, icon, label);
+    this.paintGit(row);
     row.addEventListener("click", () => this.activate(node));
     row.addEventListener("keydown", (ev) => this.onKey(ev, node));
     li.append(row);
@@ -113,7 +171,9 @@ export class FileTree {
   private paintTwisty(n: Node) {
     const t = n.li.querySelector(".twisty")!;
     t.textContent = n.kind === "dir" ? (n.expanded ? "▾" : "▸") : "";
-    if (n.kind === "dir") n.li.firstElementChild!.setAttribute("aria-expanded", String(n.expanded));
+    if (n.kind !== "dir") return;
+    n.li.firstElementChild!.setAttribute("aria-expanded", String(n.expanded));
+    n.li.querySelector(".icon")!.innerHTML = n.expanded ? ICONS.open : ICONS.dir;
   }
 
   /** Enter or Space opens; arrows move between visible rows and fold folders. */
@@ -183,7 +243,11 @@ export class FileTree {
   private paintChildren(n: Node) {
     const ul = document.createElement("ul");
     ul.setAttribute("role", "group");
-    for (const c of n.children ?? []) ul.append(c.li);
+    for (const c of n.children ?? []) {
+      // Colours may have changed while the folder was closed.
+      this.paintGit(c.li.firstElementChild as HTMLElement);
+      ul.append(c.li);
+    }
     const note = (text: string) => {
       const li = document.createElement("li");
       li.className = "note";

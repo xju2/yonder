@@ -93,6 +93,9 @@ pub struct Status {
     pub ahead: u32,
     pub behind: u32,
     pub files: Vec<Change>,
+    /// Ignored paths, relative to the repository root. An ignored folder is
+    /// listed once, ending in `/`, without its contents.
+    pub ignored: Vec<String>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -117,13 +120,15 @@ pub async fn status(conn: &Connection, repo: &str) -> Result<Status, Error> {
             "--branch",
             // Each untracked file, not just its folder, so every row opens.
             "--untracked-files=all",
+            // Ignored folders as one entry each: never a walk of node_modules.
+            "--ignored=matching",
         ],
     )
     .await?;
     Ok(parse_status(&out))
 }
 
-/// Parse `git status --porcelain=v2 -z --branch`.
+/// Parse `git status --porcelain=v2 -z --branch --ignored`.
 pub fn parse_status(out: &[u8]) -> Status {
     let mut st = Status::default();
     let mut fields = out
@@ -176,6 +181,10 @@ pub fn parse_status(out: &[u8]) -> Status {
                 path: path.to_string(),
                 old_path: None,
             }),
+            '!' => {
+                st.ignored.push(entry[2..].to_string());
+                None
+            }
             '?' => Some(Change {
                 status: '?',
                 path: entry[2..].to_string(),
@@ -261,6 +270,32 @@ pub fn parse_log(out: &[u8]) -> Vec<Commit> {
             })
         })
         .collect()
+}
+
+/// Tracked and untracked files under `dir`, relative to it, leaving out
+/// ignored ones. `None` if `dir` is not in a repository.
+pub async fn files(conn: &Connection, dir: &str) -> Result<Option<Vec<String>>, Error> {
+    let args = [
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ];
+    let out = git(conn, dir, &args, MAX_LISTING).await?;
+    if out.code != Some(0) {
+        if out.stderr.contains("not a git repository") {
+            return Ok(None);
+        }
+        return Err(Error::new(ErrorKind::Other, out.stderr.trim()));
+    }
+    Ok(Some(
+        out.stdout
+            .split(|&b| b == 0)
+            .filter(|f| !f.is_empty())
+            .map(|f| String::from_utf8_lossy(f).into_owned())
+            .collect(),
+    ))
 }
 
 /// Files a commit changed, compared with its first parent.
@@ -354,7 +389,7 @@ mod tests {
 1 D. N... 100644 000000 000000 ccc 000 gone.txt\0\
 2 R. N... 100644 100644 100644 ddd ddd R100 lib/new.rs\0lib/old.rs\0\
 u UU N... 100644 100644 100644 100644 e1 e2 e3 both.txt\0\
-? notes/todo.md\0";
+? notes/todo.md\0! target/\0";
         let st = parse_status(out);
         assert_eq!(st.branch.as_deref(), Some("main"));
         assert_eq!(st.upstream.as_deref(), Some("origin/main"));
@@ -375,6 +410,7 @@ u UU N... 100644 100644 100644 100644 e1 e2 e3 both.txt\0\
                 ('?', "notes/todo.md", None),
             ]
         );
+        assert_eq!(st.ignored, vec!["target/"]);
     }
 
     #[test]

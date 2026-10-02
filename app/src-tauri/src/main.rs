@@ -491,6 +491,17 @@ async fn git_commit_files(
     Ok(git::commit_files(&conn, &repo, &hash).await?)
 }
 
+/// Every file under `dir` that git does not ignore, relative to `dir`, for
+/// Go to File. `None` when `dir` is not in a repository.
+#[tauri::command]
+async fn git_files(
+    state: State<'_, AppState>,
+    dir: String,
+) -> Result<Option<Vec<String>>, CmdError> {
+    let conn = state.current()?;
+    Ok(git::files(&conn, &dir).await?)
+}
+
 #[derive(Serialize)]
 struct DiffOut {
     /// Both sides as text; `None` when either side is not UTF-8 text.
@@ -672,7 +683,9 @@ fn request_quit(app: &AppHandle) -> bool {
     false
 }
 
-/// The standard macOS menus, except that Quit goes through `request_quit`.
+/// The standard macOS menus, except that Quit goes through `request_quit`
+/// and the File items are handled by the UI (menu shortcuts work even while
+/// the editor or a terminal has the keyboard).
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let quit = MenuItemBuilder::with_id("quit", "Quit Yonder")
         .accelerator("CmdOrCtrl+Q")
@@ -688,6 +701,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&quit)
         .build()?;
+    let file = SubmenuBuilder::new(app, "File")
+        .item(
+            &MenuItemBuilder::with_id("go-to-file", "Go to File…")
+                .accelerator("CmdOrCtrl+P")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("close-tab", "Close Tab")
+                .accelerator("CmdOrCtrl+W")
+                .build(app)?,
+        )
+        .build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -697,14 +723,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .paste()
         .select_all()
         .build()?;
+    let view = SubmenuBuilder::new(app, "View")
+        .item(
+            &MenuItemBuilder::with_id("toggle-sidebar", "Toggle Sidebar")
+                .accelerator("CmdOrCtrl+B")
+                .build(app)?,
+        )
+        .build()?;
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
-        .separator()
-        .close_window()
         .build()?;
     MenuBuilder::new(app)
-        .items(&[&app_menu, &edit, &window])
+        .items(&[&app_menu, &file, &edit, &view, &window])
         .build()
 }
 
@@ -735,6 +766,7 @@ fn main() {
             git_log,
             git_commit_files,
             git_diff,
+            git_files,
             quit_app,
             askpass_answer
         ])
@@ -743,10 +775,12 @@ fn main() {
             Ok(())
         })
         .menu(build_menu)
-        .on_menu_event(|app, event| {
-            if event.id() == "quit" && request_quit(app) {
-                app.exit(0);
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "quit" if request_quit(app) => app.exit(0),
+            id @ ("go-to-file" | "close-tab" | "toggle-sidebar") => {
+                let _ = app.emit("menu", id);
             }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while starting Yonder")

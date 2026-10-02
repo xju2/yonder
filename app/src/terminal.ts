@@ -201,6 +201,13 @@ export class TerminalPanel {
     return tab;
   }
 
+  /** Close the active terminal if it has the keyboard; false otherwise. */
+  closeFocused(): boolean {
+    if (!this.active || !this.panel.contains(document.activeElement)) return false;
+    this.close(this.active);
+    return true;
+  }
+
   private select(t: Term) {
     this.active = t;
     for (const x of this.terms) {

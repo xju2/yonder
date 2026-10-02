@@ -132,6 +132,8 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   files: GitChange[];
+  /** Relative to the repository root; ignored folders end in "/". */
+  ignored: string[];
 }
 export interface GitCommit {
   hash: string;
@@ -159,14 +161,20 @@ export const gitCommitFiles = (repo: string, hash: string) =>
 export const gitDiff = (repo: string, path: string, oldPath: string | null, rev: string | null) =>
   invoke<GitDiff>("git_diff", { repo, path, oldPath, rev });
 
+/** Files under `dir` that git does not ignore, relative to it; null outside a repository. */
+export const gitFiles = (dir: string) => invoke<string[] | null>("git_files", { dir });
+
 // ---- quitting
 
-/** Whether any tab has unsaved edits, so quitting knows to ask first. */
 /** Quit without further questions. */
 export const quitApp = () => invoke<void>("quit_app");
 /** Cmd+Q or the Dock asked to quit while edits are unsaved. */
 export const onQuitRequested = (f: () => void): Promise<UnlistenFn> =>
   listen("quit-requested", () => f());
+
+/** A File or View menu item (or its shortcut) was chosen. */
+export const onMenu = (f: (id: string) => void): Promise<UnlistenFn> =>
+  listen<string>("menu", (e) => f(e.payload));
 
 // ---- questions from ssh
 
