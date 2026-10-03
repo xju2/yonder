@@ -8,6 +8,7 @@
 mod open;
 mod ops;
 mod pty;
+mod streams;
 
 use std::io::{self, BufReader, BufWriter, Write};
 use std::sync::{Arc, Mutex};
@@ -45,6 +46,7 @@ fn serve() -> io::Result<()> {
         }
     });
     let ptys = pty::Ptys::new(Arc::clone(&emit));
+    let streams = streams::Streams::new(Arc::clone(&emit));
 
     let mut input = BufReader::new(io::stdin());
     while let Some(Request { id, op }) = read_frame::<_, Request>(&mut input)? {
@@ -61,6 +63,11 @@ fn serve() -> io::Result<()> {
             | Op::PtyResize { .. }
             | Op::PtyAck { .. }
             | Op::PtyClose { .. } => reply(ptys.handle(op)),
+            // Likewise for language servers and tunnels.
+            Op::ProcOpen { .. }
+            | Op::TcpOpen { .. }
+            | Op::StreamInput { .. }
+            | Op::StreamClose { .. } => reply(streams.handle(op)),
             // One thread per file request: a slow stat on a busy metadata
             // server must not hold up an unrelated read.
             op => {
@@ -74,5 +81,6 @@ fn serve() -> io::Result<()> {
             }
         }
     }
+    streams.close_all();
     Ok(())
 }

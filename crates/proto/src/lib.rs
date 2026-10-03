@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -107,6 +107,31 @@ pub enum Op {
         args: Vec<String>,
         max_bytes: u64,
     },
+    /// Run `script` with `/bin/sh` in `cwd`, started from the login shell so
+    /// PATH and modules match a terminal's. Its stdout and stderr arrive as
+    /// [`Event::StreamOutput`], its end as [`Event::StreamExit`]. The app
+    /// picks `id`, so it can route output that arrives before the reply.
+    /// The process is ended when the agent exits.
+    ProcOpen {
+        id: u64,
+        cwd: String,
+        script: String,
+    },
+    /// Connect to `port` on the remote's loopback, as stream `id`.
+    TcpOpen {
+        id: u64,
+        port: u16,
+    },
+    /// Bytes for a stream's stdin or socket. Handled in arrival order.
+    StreamInput {
+        id: u64,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    /// End a process (SIGTERM to its process group) or close a socket.
+    StreamClose {
+        id: u64,
+    },
 }
 
 /// Agent -> app.
@@ -129,6 +154,16 @@ pub enum Event {
     },
     /// The shell exited. `code` is `None` if a signal ended it.
     PtyExit { pty: u64, code: Option<i32> },
+    StreamOutput {
+        id: u64,
+        /// From the process's stderr rather than stdout.
+        stderr: bool,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    /// The process exited or the socket closed. `code` is `None` for a
+    /// socket or a signal.
+    StreamExit { id: u64, code: Option<i32> },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

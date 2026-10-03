@@ -11,6 +11,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { workspace = true }
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 yonder-proto.workspace = true
 yonder-client.workspace = true

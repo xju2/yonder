@@ -517,3 +517,104 @@ async fn git_status_history_and_contents() {
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::TooLarge, "{err}");
 }
+
+/// Bytes from stream `id` until `want` appears, and whether it then ended.
+async fn stream_until(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+    id: u64,
+    want: &str,
+) -> String {
+    let mut seen = String::new();
+    let wait = async {
+        while let Some(e) = events.recv().await {
+            if let Event::StreamOutput { id: i, data, .. } = e {
+                assert_eq!(i, id);
+                seen.push_str(&String::from_utf8_lossy(&data));
+                if seen.contains(want) {
+                    return;
+                }
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), wait)
+        .await
+        .unwrap_or_else(|_| panic!("no {want:?} in stream output: {seen:?}"));
+    seen
+}
+
+async fn stream_exit(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+    id: u64,
+) -> Option<i32> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Some(Event::StreamExit { id: i, code }) if i == id => return code,
+                Some(_) => {}
+                None => panic!("events ended"),
+            }
+        }
+    })
+    .await
+    .expect("no exit event")
+}
+
+#[tokio::test]
+async fn process_and_tcp_streams() {
+    let fx = Fixture::new("");
+    let (_, sink) = collect_log();
+    let conn = connect(&fx.options(), sink).await.unwrap();
+    let mut events = conn.take_events().unwrap();
+    let cwd = fx.home().to_string_lossy().to_string();
+
+    // A process: stdin to stdout in order, stderr apart, and its exit code.
+    let open = Op::ProcOpen {
+        id: 7,
+        cwd: cwd.clone(),
+        script: "echo \"in $(pwd)\" >&2; while read l; do echo \"got $l\"; done; exit 4".into(),
+    };
+    assert_eq!(conn.call(open).await.unwrap(), Reply::Done);
+    for l in ["a\n", "b\n"] {
+        conn.send(Op::StreamInput {
+            id: 7,
+            data: l.into(),
+        })
+        .unwrap();
+    }
+    let out = stream_until(&mut events, 7, "got b").await;
+    assert!(out.contains(&format!("in {cwd}")), "{out:?}");
+    assert!(out.contains("got a\ngot b"), "{out:?}");
+
+    // Closing ends the process group.
+    assert_eq!(
+        conn.call(Op::StreamClose { id: 7 }).await.unwrap(),
+        Reply::Done
+    );
+    assert_eq!(stream_exit(&mut events, 7).await, None);
+
+    // A socket on the remote's loopback.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let (mut s, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 5];
+        s.read_exact(&mut buf).unwrap();
+        s.write_all(&[b"echo:", &buf[..]].concat()).unwrap();
+    });
+    assert_eq!(
+        conn.call(Op::TcpOpen { id: 8, port }).await.unwrap(),
+        Reply::Done
+    );
+    conn.send(Op::StreamInput {
+        id: 8,
+        data: b"hello".to_vec(),
+    })
+    .unwrap();
+    stream_until(&mut events, 8, "echo:hello").await;
+    server.join().unwrap();
+    assert_eq!(stream_exit(&mut events, 8).await, None);
+
+    let refused = Op::TcpOpen { id: 9, port };
+    assert!(conn.call(refused).await.is_err());
+}

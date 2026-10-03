@@ -42,6 +42,13 @@ dialog. Cancel ends that login attempt.
   exclude, such as `*.py, ./src` or `build`). It runs `git grep` on the
   remote, so binary and git-ignored files are skipped, inside a repository
   or not. Click a line to open it there.
+- **Code intelligence:** in Python and C/C++ files, <kbd>F12</kbd> or
+  <kbd>Cmd</kbd>+click goes to a definition (opening its file), hovering shows
+  types and docs, problems are underlined, and <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>
+  lists the file's symbols. Yonder uses the language server already on the
+  remote: basedpyright, pyright or pylsp from the folder's `.venv`, `venv` or
+  `env` first, then `PATH`; clangd from `PATH` (it reads
+  `compile_commands.json`). With none, the status bar says what to install.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,

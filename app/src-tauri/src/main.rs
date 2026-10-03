@@ -42,6 +42,33 @@ struct AppState {
     /// Set when the person cancels a question: ssh would otherwise ask the
     /// same question again, so the rest of this login attempt is declined.
     prompts_cancelled: Arc<AtomicBool>,
+    /// Where each stream's output goes, by stream id, with its connection.
+    streams: Streams,
+    /// Local ports that tunnel to a remote port, by connection and port.
+    tunnels: Mutex<HashMap<(u64, u16), u16>>,
+}
+
+type Streams = Arc<Mutex<HashMap<u64, (u64, Sink)>>>;
+
+/// Stream ids are picked here, unique across connections.
+static NEXT_STREAM: AtomicU64 = AtomicU64::new(1);
+
+enum Sink {
+    /// To the UI: each message is a tag byte and data. Tag 1 is stdout, 2
+    /// stderr, 0 the end, followed by the exit code in decimal if any.
+    Ui(Channel<InvokeResponseBody>),
+    /// To a local socket; dropping the sender closes it.
+    Tcp(tokio::sync::mpsc::UnboundedSender<Vec<u8>>),
+}
+
+impl Sink {
+    fn end(self, code: Option<i32>) {
+        if let Sink::Ui(ch) = self {
+            let mut msg = vec![0];
+            msg.extend(code.map(|c| c.to_string()).unwrap_or_default().bytes());
+            let _ = ch.send(InvokeResponseBody::Raw(msg));
+        }
+    }
 }
 
 /// Where each terminal's output goes. Output can arrive before `pty_open`
@@ -60,11 +87,12 @@ struct PtyExitEvent {
     code: Option<i32>,
 }
 
-/// Route the agent's terminal events to the UI until the connection ends.
+/// Route the agent's terminal and stream events until the connection ends.
 fn forward_events(
     app: AppHandle,
     conn: &Connection,
     terminals: Arc<Mutex<HashMap<u64, Terminals>>>,
+    streams: Streams,
     generation: u64,
 ) {
     let Some(mut events) = conn.take_events() else {
@@ -72,6 +100,30 @@ fn forward_events(
     };
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
+            match event {
+                Event::StreamOutput { id, stderr, data } => {
+                    match streams.lock().unwrap().get(&id) {
+                        Some((_, Sink::Ui(ch))) => {
+                            let mut msg = Vec::with_capacity(data.len() + 1);
+                            msg.push(if stderr { 2 } else { 1 });
+                            msg.extend_from_slice(&data);
+                            let _ = ch.send(InvokeResponseBody::Raw(msg));
+                        }
+                        Some((_, Sink::Tcp(tx))) => {
+                            let _ = tx.send(data);
+                        }
+                        None => {}
+                    }
+                    continue;
+                }
+                Event::StreamExit { id, code } => {
+                    if let Some((_, sink)) = streams.lock().unwrap().remove(&id) {
+                        sink.end(code);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             let mut all = terminals.lock().unwrap();
             let Some(t) = all.get_mut(&generation) else {
                 return;
@@ -83,6 +135,7 @@ fn forward_events(
                     }
                     None => t.early_output.entry(pty).or_default().push(data),
                 },
+                Event::StreamOutput { .. } | Event::StreamExit { .. } => {}
                 Event::PtyExit { pty, code } => {
                     if t.channels.remove(&pty).is_some() {
                         let _ = app.emit(
@@ -256,7 +309,13 @@ async fn connect(
         .lock()
         .unwrap()
         .insert(generation, Terminals::default());
-    forward_events(app.clone(), &conn, Arc::clone(&state.terminals), generation);
+    forward_events(
+        app.clone(),
+        &conn,
+        Arc::clone(&state.terminals),
+        Arc::clone(&state.streams),
+        generation,
+    );
 
     let watcher = Arc::clone(&conn);
     tauri::async_runtime::spawn(async move {
@@ -264,6 +323,26 @@ async fn connect(
         let state = app.state::<AppState>();
         state.conns.lock().unwrap().remove(&generation);
         state.terminals.lock().unwrap().remove(&generation);
+        let ended: Vec<Sink> = {
+            let mut streams = state.streams.lock().unwrap();
+            let ids: Vec<u64> = streams
+                .iter()
+                .filter(|(_, (c, _))| *c == generation)
+                .map(|(id, _)| *id)
+                .collect();
+            ids.iter()
+                .filter_map(|id| streams.remove(id))
+                .map(|(_, s)| s)
+                .collect()
+        };
+        for sink in ended {
+            sink.end(None);
+        }
+        state
+            .tunnels
+            .lock()
+            .unwrap()
+            .retain(|(c, _), _| *c != generation);
         let _ = app.emit("conn-closed", ClosedEvent { generation, reason });
     });
     Ok(info)
@@ -507,6 +586,130 @@ async fn pty_close(state: State<'_, AppState>, conn: u64, pty: u64) -> Result<()
     }
     state.get(conn)?.call(Op::PtyClose { pty }).await?;
     Ok(())
+}
+
+// ---- streams: language servers, Jupyter, and tunnels to remote ports
+
+/// Run `script` with sh in `cwd` on the remote; its output goes to `output`
+/// (see [`Sink::Ui`]). Returns the stream's id.
+#[tauri::command]
+async fn proc_open(
+    state: State<'_, AppState>,
+    conn: u64,
+    cwd: String,
+    script: String,
+    output: Channel<InvokeResponseBody>,
+) -> Result<u64, CmdError> {
+    let c = state.get(conn)?;
+    let id = NEXT_STREAM.fetch_add(1, Ordering::Relaxed);
+    // Registered first: output can arrive before the reply.
+    state
+        .streams
+        .lock()
+        .unwrap()
+        .insert(id, (conn, Sink::Ui(output)));
+    if let Err(e) = c.call(Op::ProcOpen { id, cwd, script }).await {
+        state.streams.lock().unwrap().remove(&id);
+        return Err(e.into());
+    }
+    Ok(id)
+}
+
+/// Bytes for a process's stdin. Not async, so writes keep their order.
+#[tauri::command]
+fn stream_write(
+    state: State<'_, AppState>,
+    conn: u64,
+    id: u64,
+    data: String,
+) -> Result<(), CmdError> {
+    let data = data.into_bytes();
+    Ok(state.get(conn)?.send(Op::StreamInput { id, data })?)
+}
+
+#[tauri::command]
+async fn stream_close(state: State<'_, AppState>, conn: u64, id: u64) -> Result<(), CmdError> {
+    state.streams.lock().unwrap().remove(&id);
+    state.get(conn)?.call(Op::StreamClose { id }).await?;
+    Ok(())
+}
+
+/// A port on this Mac's loopback that leads to `port` on the remote's,
+/// through the agent: no second ssh login. Kept until the connection ends.
+#[tauri::command]
+async fn tunnel_open(state: State<'_, AppState>, conn: u64, port: u16) -> Result<u16, CmdError> {
+    let c = state.get(conn)?;
+    if let Some(local) = state.tunnels.lock().unwrap().get(&(conn, port)) {
+        return Ok(*local);
+    }
+    let io_err = |e: std::io::Error| CmdError {
+        kind: "other",
+        message: format!("could not listen on this Mac: {e}"),
+        hint: None,
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(io_err)?;
+    let local = listener.local_addr().map_err(io_err)?.port();
+    state.tunnels.lock().unwrap().insert((conn, port), local);
+    let streams = Arc::clone(&state.streams);
+    tauri::async_runtime::spawn(async move {
+        while let Ok((sock, _)) = listener.accept().await {
+            if c.is_closed() {
+                return;
+            }
+            let _ = sock.set_nodelay(true);
+            tauri::async_runtime::spawn(tunnel(
+                Arc::clone(&c),
+                Arc::clone(&streams),
+                conn,
+                port,
+                sock,
+            ));
+        }
+    });
+    Ok(local)
+}
+
+/// Carry one local connection to the remote port and back.
+async fn tunnel(
+    c: Arc<Connection>,
+    streams: Streams,
+    conn: u64,
+    port: u16,
+    sock: tokio::net::TcpStream,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let id = NEXT_STREAM.fetch_add(1, Ordering::Relaxed);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    streams.lock().unwrap().insert(id, (conn, Sink::Tcp(tx)));
+    if c.call(Op::TcpOpen { id, port }).await.is_err() {
+        streams.lock().unwrap().remove(&id);
+        return;
+    }
+    let (mut read, mut write) = sock.into_split();
+    let down = tauri::async_runtime::spawn(async move {
+        while let Some(data) = rx.recv().await {
+            if write.write_all(&data).await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match read.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let data = buf[..n].to_vec();
+                if c.send(Op::StreamInput { id, data }).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = c.send(Op::StreamClose { id });
+    streams.lock().unwrap().remove(&id);
+    let _ = down.await;
 }
 
 // ---- git (read-only)
@@ -927,6 +1130,10 @@ fn main() {
             git_diff,
             git_files,
             search,
+            proc_open,
+            stream_write,
+            stream_close,
+            tunnel_open,
             quit_app,
             copy_text,
             copy_png,

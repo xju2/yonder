@@ -1,6 +1,6 @@
 // Typed wrappers around the Tauri commands in src-tauri/src/main.rs.
 
-import { invoke, type Channel } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface ConnInfo {
@@ -62,6 +62,7 @@ export function asError(e: unknown): CmdError {
  */
 let conn = 0;
 export const useConnection = (id: number) => (conn = id);
+export const currentConnection = () => conn;
 
 export const connect = (host: string, path: string) =>
   invoke<ConnInfo>("connect", { host, path });
@@ -132,6 +133,38 @@ export interface PtyExitEvent {
 }
 export const onPtyExit = (f: (e: PtyExitEvent) => void): Promise<UnlistenFn> =>
   listen<PtyExitEvent>("pty-exit", (e) => f(e.payload));
+
+// ---- remote processes and tunnels
+
+/**
+ * Run `script` with sh in `cwd`, from the login shell. `onExit` gets the
+ * exit code, or null after a signal or a lost connection.
+ */
+export function procOpen(
+  conn: number,
+  cwd: string,
+  script: string,
+  onOutput: (data: Uint8Array, stderr: boolean) => void,
+  onExit: (code: number | null) => void,
+): Promise<number> {
+  // Each message is a tag byte then data: 1 stdout, 2 stderr, 0 the end
+  // (then the exit code in decimal, if any).
+  const output = new Channel<ArrayBuffer>();
+  output.onmessage = (buf) => {
+    const bytes = new Uint8Array(buf);
+    if (bytes[0] === 0) {
+      const code = new TextDecoder().decode(bytes.subarray(1));
+      onExit(code ? Number(code) : null);
+    } else onOutput(bytes.subarray(1), bytes[0] === 2);
+  };
+  return invoke<number>("proc_open", { conn, cwd, script, output });
+}
+/** Bytes for the process's stdin, in call order. */
+export const streamWrite = (conn: number, id: number, data: string) =>
+  invoke<void>("stream_write", { conn, id, data });
+export const streamClose = (conn: number, id: number) => invoke<void>("stream_close", { conn, id });
+/** A port on this Mac leading to `port` on the remote's loopback. */
+export const tunnelOpen = (conn: number, port: number) => invoke<number>("tunnel_open", { conn, port });
 
 // ---- git (read-only)
 

@@ -4,6 +4,7 @@ import * as api from "./api";
 import { baseName, Editors } from "./editor";
 import { Finder, Picker } from "./finder";
 import { GitPanel } from "./git";
+import { Languages } from "./lsp";
 import { ask, askText, tell } from "./modal";
 import { SearchPanel } from "./search";
 import { TerminalPanel } from "./terminal";
@@ -276,6 +277,12 @@ const editors = new Editors(
   () => void git.refreshChanges(),
   pathMenu,
   (path) => void reveal(path),
+);
+new Languages(
+  () => (conn ? { host: conn.host, root: conn.root } : null),
+  (host) => hosts.get(host)?.generation ?? null,
+  (path, at) => void editors.open(path, at),
+  (msg) => status(msg),
 );
 const picker = new Picker();
 const finder = new Finder(
