@@ -96,6 +96,17 @@ const isMarkdown = (path: string) => /\.(md|markdown|mdown|mkd)$/i.test(path);
 
 export const baseName = (path: string) => path.split("/").pop() || path;
 
+/** Where to put the cursor in a file that opens: 1-based, as Monaco counts. */
+export interface Place {
+  line: number;
+  column: number;
+  /** Characters to select from there. */
+  length: number;
+}
+
+/** Each model gets its own URI: two workspaces may open the same path. */
+let modelSeq = 0;
+
 interface Tab {
   path: string;
   /** null for files that cannot be shown as text. */
@@ -123,6 +134,10 @@ interface Tab {
 export class Editors {
   private tabs: Tab[] = [];
   private active: Tab | null = null;
+  /** Tabs of the other workspaces, unsaved edits included, by workspace. */
+  private kept = new Map<string, { tabs: Tab[]; active: Tab | null }>();
+  /** Bumped by each switch; a file still loading for the old one is dropped. */
+  private generation = 0;
   private editor: monaco.editor.IStandaloneCodeEditor;
 
   private diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
@@ -138,6 +153,8 @@ export class Editors {
     private position: (text: string) => void,
     private onSaved: () => void,
     private onTabMenu: (path: string, reload: (() => void) | null) => void,
+    /** A tab was double-clicked: show its file in the tree. */
+    private onReveal: (path: string) => void,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -159,15 +176,50 @@ export class Editors {
   }
 
   hasUnsaved(): boolean {
-    return this.tabs.some((t) => this.isDirty(t));
+    const all = [this.tabs, ...[...this.kept.values()].map((k) => k.tabs)].flat();
+    return all.some((t) => this.isDirty(t));
   }
 
-  async open(path: string) {
+  /** Put away this workspace's tabs and bring back those of workspace `key`. */
+  switchTo(from: string | null, key: string) {
+    this.generation++;
+    if (this.active?.model) this.active.view = this.editor.saveViewState();
+    if (from) this.kept.set(from, { tabs: this.tabs, active: this.active });
+    for (const t of this.tabs) t.el.remove();
+    const next = this.kept.get(key) ?? { tabs: [], active: null };
+    this.kept.delete(key);
+    this.tabs = next.tabs;
+    for (const t of this.tabs) this.tabsEl.append(t.el);
+    // Its view state is saved above; show() must not save it again.
+    this.active = null;
+    this.show(next.active);
+  }
+
+  /** The selected text, if it is on one line: a search to start with. */
+  selection(): string {
+    const sel = this.editor.getSelection();
+    if (!sel || sel.isEmpty() || sel.startLineNumber !== sel.endLineNumber) return "";
+    return this.editor.getModel()?.getValueInRange(sel) ?? "";
+  }
+
+  /** Open `path` in a tab, or show its tab; `at` selects a place in it. */
+  async open(path: string, at?: Place) {
+    await this.openTab(path);
+    const tab = this.active;
+    if (!at || tab?.path !== path || !tab.model) return;
+    const range = new monaco.Range(at.line, at.column, at.line, at.column + at.length);
+    this.editor.setSelection(range);
+    this.editor.revealRangeInCenter(range);
+    this.editor.focus();
+  }
+
+  private async openTab(path: string) {
     const existing = this.tabs.find((t) => t.path === path);
     if (existing) return this.show(existing);
     const kind = viewKindFor(path);
     if (kind) return this.openViewer(path, kind);
     this.status(`Opening ${baseName(path)}…`);
+    const gen = this.generation;
     let file;
     try {
       file = await readFile(path);
@@ -181,6 +233,7 @@ export class Editors {
       }
       return;
     }
+    if (gen !== this.generation) return;
     // Another click may have opened it while we waited.
     const raced = this.tabs.find((t) => t.path === path);
     if (raced) return this.show(raced);
@@ -203,8 +256,7 @@ export class Editors {
     if (file.text === null) {
       tab.note = `${baseName(path)} is not a text file (${file.size.toLocaleString()} bytes).`;
     } else {
-      const uri = monaco.Uri.from({ scheme: "yonder", path });
-      monaco.editor.getModel(uri)?.dispose();
+      const uri = monaco.Uri.from({ scheme: "yonder", authority: String(++modelSeq), path });
       tab.model = monaco.editor.createModel(file.text, languageFor(path), uri);
       tab.savedVersion = tab.model.getAlternativeVersionId();
       tab.model.onDidChangeContent(() => this.paintTab(tab));
@@ -218,6 +270,7 @@ export class Editors {
   private async openViewer(path: string, kind: ViewKind) {
     const name = baseName(path);
     this.status(`Opening ${name}…`);
+    const gen = this.generation;
     let version: string;
     let bytes: ArrayBuffer;
     try {
@@ -230,6 +283,7 @@ export class Editors {
       await tell(what, err.message);
       return;
     }
+    if (gen !== this.generation) return;
     const raced = this.tabs.find((t) => t.path === path);
     if (raced) return this.show(raced);
 
@@ -287,6 +341,7 @@ export class Editors {
     // Uncommitted changes may have moved on since the tab was opened.
     if (existing && req.rev) return this.show(existing);
     this.status(`Comparing ${name}…`);
+    const gen = this.generation;
     let d;
     try {
       d = await gitDiff(req.repo, req.path, req.oldPath, req.rev);
@@ -296,6 +351,7 @@ export class Editors {
       return;
     }
     this.status("");
+    if (gen !== this.generation) return;
     const lang = languageFor(req.path);
     const raced = this.tabs.find((t) => t.path === key);
     if (raced) {
@@ -540,6 +596,9 @@ export class Editors {
     });
     tab.el.append(name, close);
     tab.el.addEventListener("click", () => this.show(tab));
+    tab.el.addEventListener("dblclick", (e) => {
+      if (e.target !== close) this.onReveal(tab.path.replace(/^diff:[^:]*:/, ""));
+    });
     tab.el.addEventListener("auxclick", (e) => {
       if (e.button === 1) void this.close(tab);
     });

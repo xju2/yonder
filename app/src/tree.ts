@@ -52,6 +52,8 @@ export class FileTree {
   private marks = new Map<string, string>();
   /** Absolute paths git ignores; folders cover everything below them. */
   private ignored: string[] = [];
+  /** Trees of the other workspaces, by workspace, as they were left. */
+  private kept = new Map<string, Node>();
 
   constructor(
     private container: HTMLElement,
@@ -69,6 +71,44 @@ export class FileTree {
     ul.append(this.root.li);
     this.container.replaceChildren(ul);
     await this.load(this.root);
+  }
+
+  /**
+   * Show the tree of workspace `key`, keeping the current one for later.
+   * A workspace seen before comes back as it was left, then refreshes.
+   */
+  async switchTo(from: string | null, key: string, root: string) {
+    if (from && this.root) this.kept.set(from, this.root);
+    const node = this.kept.get(key);
+    this.kept.delete(key);
+    if (!node || node.path !== root) return this.setRoot(root);
+    this.root = node;
+    this.refreshing = null;
+    this.container.querySelector(".tree-root")!.replaceChildren(node.li);
+    this.setActive(this.active);
+    await this.refresh();
+  }
+
+  /** Open the folders down to `path` and put the keyboard on its row. */
+  async reveal(path: string): Promise<boolean> {
+    let n = this.root;
+    if (!n) return false;
+    const base = joinPath(n.path, "");
+    if (path !== n.path && !path.startsWith(base)) return false;
+    for (const name of path.slice(base.length).split("/").filter(Boolean)) {
+      if (!n.expanded) {
+        n.expanded = true;
+        this.paintTwisty(n);
+        await this.load(n);
+      }
+      const next: Node | undefined = n.children?.find((c) => c.name === name);
+      if (!next) return false;
+      n = next;
+    }
+    const row = n.li.firstElementChild as HTMLElement;
+    row.scrollIntoView({ block: "center" });
+    row.focus();
+    return true;
   }
 
   /** Re-list every expanded folder, keeping what is expanded. */

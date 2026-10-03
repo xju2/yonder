@@ -24,6 +24,18 @@ dialog. Cancel ends that login attempt.
 - **Save:** <kbd>Cmd</kbd>+<kbd>S</kbd>. If the file changed on the remote
   since you opened it (a batch job rewrote it, say), Yonder asks before
   overwriting.
+- **Workspaces:** each is one folder on one host. <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>O</kbd>
+  (or clicking the host:folder in the status bar) switches to a recent one;
+  <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> opens a new one. The workspace you
+  leave keeps its tabs, unsaved edits and expanded folders for when you come
+  back. Another folder on the same host reuses the connection and keeps the
+  terminals; another host closes them.
+- **Search:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> or the sidebar's
+  **Search** tab finds text in every file of the folder (with match case,
+  whole word and regular expression toggles). It runs `git grep` on the
+  remote, so binary and git-ignored files are skipped, inside a repository
+  or not. Click a line to open it there.
+- **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
   where file-change notifications miss writes from other machines.

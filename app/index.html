@@ -13,6 +13,7 @@
         <label>Host <input id="host" placeholder="perlmutter" autocomplete="off" spellcheck="false" required /></label>
         <label>Folder <input id="folder" placeholder="~/project" autocomplete="off" spellcheck="false" /></label>
         <button id="connect-btn" type="submit">Connect</button>
+        <button id="connect-cancel" type="button" hidden>Back to the open workspace</button>
         <div id="recent"></div>
         <div id="connect-error" hidden></div>
         <ol id="connect-log"></ol>
@@ -25,6 +26,7 @@
           <button role="tab" id="tab-files" data-view="files" aria-controls="files-view" aria-selected="true">Files</button>
           <button role="tab" id="tab-changes" data-view="changes" aria-controls="changes-view" aria-selected="false" tabindex="-1">Changes</button>
           <button role="tab" id="tab-history" data-view="history" aria-controls="history-view" aria-selected="false" tabindex="-1">History</button>
+          <button role="tab" id="tab-search" data-view="search" aria-controls="search-view" aria-selected="false" tabindex="-1">Search</button>
         </nav>
         <section id="files-view" class="side-view" role="tabpanel" aria-labelledby="tab-files">
           <header>
@@ -35,6 +37,7 @@
         </section>
         <section id="changes-view" class="side-view" role="tabpanel" aria-labelledby="tab-changes" hidden></section>
         <section id="history-view" class="side-view" role="tabpanel" aria-labelledby="tab-history" hidden></section>
+        <section id="search-view" class="side-view" role="tabpanel" aria-labelledby="tab-search" hidden></section>
       </aside>
       <div id="sash"></div>
       <main id="main">
@@ -58,7 +61,7 @@
       </main>
       <footer id="status">
         <button id="toggle-sidebar" title="Show or hide the sidebar (⌘B)" aria-label="Show or hide the sidebar">◧</button>
-        <span id="status-conn"></span>
+        <button id="status-conn" title="Switch workspace (⌥⌘O)"></button>
         <span id="status-msg"></span>
         <span id="status-pos"></span>
         <button id="toggle-terminal" title="Show or hide terminals (Ctrl+`)">Terminal</button>

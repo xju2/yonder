@@ -208,6 +208,16 @@ export class TerminalPanel {
     return tab;
   }
 
+  /** Some shell is still running. */
+  hasLive(): boolean {
+    return this.byPty.size > 0;
+  }
+
+  /** Close every terminal; call disconnected() first, their shells are gone. */
+  closeAll() {
+    for (const t of [...this.terms]) this.close(t);
+  }
+
   /** Close the active terminal if it has the keyboard; false otherwise. */
   closeFocused(): boolean {
     if (!this.active || !this.panel.contains(document.activeElement)) return false;

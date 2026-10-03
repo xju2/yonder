@@ -90,6 +90,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .card input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #connect-btn { padding: 7px; font-weight: 600; }
+#connect-cancel { padding: 7px; }
 #recent { display: flex; flex-wrap: wrap; gap: 6px; }
 #recent .recent { font: 12px var(--mono); padding: 2px 8px; }
 #connect-error {
@@ -193,6 +194,43 @@ button:disabled { opacity: 0.6; cursor: default; }
 .git-commit-row[aria-expanded="true"] { background: var(--bg-active); }
 .git-commit-files { padding: 2px 0 6px 8px; }
 .git-more { margin: 8px 12px; width: calc(100% - 24px); }
+/* ---- search view */
+
+.search-box { display: flex; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font: 12px var(--mono);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search-toggle { padding: 0 5px; border: none; background: none; font: 11px var(--mono); color: var(--fg-dim); }
+.search-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.search-file .twisty { width: 10px; flex: none; color: var(--fg-dim); }
+.search-count {
+  margin-left: auto;
+  flex: none;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--bg-active);
+  font-size: 11px;
+}
+.search-line {
+  padding: 1px 12px 1px 32px;
+  font: 12px var(--mono);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.search-line:hover { background: var(--bg-hover); }
+.search-line:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.search-line mark { background: rgb(234 179 8 / 0.4); color: inherit; border-radius: 2px; }
+
 #tree { flex: 1; overflow: auto; padding: 4px 0; }
 #tree ul { list-style: none; margin: 0; padding: 0 0 0 12px; }
 #tree ul.tree-root, #tree ul.tree-root > li > ul { padding: 0; }
@@ -431,6 +469,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   white-space: nowrap;
   overflow: hidden;
 }
+#status-conn { border: none; background: none; padding: 0 4px; color: inherit; font-size: 12px; }
+#status-conn:hover { background: var(--bg-hover); color: var(--fg); }
 #status-conn::before { content: "● "; color: #3fa65a; }
 #status-conn.down::before { color: var(--danger); }
 #status-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; }

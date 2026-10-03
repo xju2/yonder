@@ -13,7 +13,7 @@ use tauri::ipc::{Channel, InvokeResponseBody, Response};
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Wry};
 use yonder_client::askpass::{self, Askpass};
-use yonder_client::git::{self, Change, Commit, Status};
+use yonder_client::git::{self, Change, Commit, Found, Status};
 use yonder_client::{connect as open_connection, ConnectOptions, Connection, Level, LogLine};
 use yonder_proto::{EntryKind, Error as ProtoError, ErrorKind, Event, Op, Reply};
 
@@ -193,9 +193,6 @@ async fn connect(
     path: String,
 ) -> Result<ConnInfo, CmdError> {
     let _attempt = state.connecting.lock().await;
-    if let Some(old) = state.conn.lock().unwrap().take() {
-        old.close();
-    }
     let generation = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
 
     let log_app = app.clone();
@@ -227,17 +224,7 @@ async fn connect(
         hint: e.hint,
     })?;
 
-    let root = match conn.call(Op::Resolve { path: path.clone() }).await? {
-        Reply::Path { path, is_dir: true } => path,
-        Reply::Path { path, .. } => {
-            return Err(CmdError {
-                kind: "not_directory",
-                message: format!("{path} is not a folder"),
-                hint: None,
-            })
-        }
-        other => return Err(unexpected(other)),
-    };
+    let root = resolve_folder(&conn, path).await?;
 
     let conn = Arc::new(conn);
     let info = ConnInfo {
@@ -247,7 +234,11 @@ async fn connect(
         hostname: conn.info().hostname.clone(),
         home: conn.info().home.clone(),
     };
-    *state.conn.lock().unwrap() = Some(Arc::clone(&conn));
+    // The old connection stays up until this one works, so a failed switch
+    // to another host leaves the current one as it was.
+    if let Some(old) = state.conn.lock().unwrap().replace(Arc::clone(&conn)) {
+        old.close();
+    }
     *state.terminals.lock().unwrap() = Terminals {
         generation,
         ..Default::default()
@@ -260,6 +251,25 @@ async fn connect(
         let _ = app.emit("conn-closed", ClosedEvent { generation, reason });
     });
     Ok(info)
+}
+
+async fn resolve_folder(conn: &Connection, path: String) -> Result<String, CmdError> {
+    match conn.call(Op::Resolve { path }).await? {
+        Reply::Path { path, is_dir: true } => Ok(path),
+        Reply::Path { path, .. } => Err(CmdError {
+            kind: "not_directory",
+            message: format!("{path} is not a folder"),
+            hint: None,
+        }),
+        other => Err(unexpected(other)),
+    }
+}
+
+/// Another folder on the connected host: no new ssh session.
+#[tauri::command]
+async fn open_folder(state: State<'_, AppState>, path: String) -> Result<String, CmdError> {
+    let conn = state.current()?;
+    resolve_folder(&conn, path).await
 }
 
 #[tauri::command]
@@ -502,6 +512,20 @@ async fn git_files(
     Ok(git::files(&conn, &dir).await?)
 }
 
+/// Lines matching `query` in the files under `dir` that git does not ignore.
+#[tauri::command]
+async fn search(
+    state: State<'_, AppState>,
+    dir: String,
+    query: String,
+    regex: bool,
+    case_sensitive: bool,
+    word: bool,
+) -> Result<Found, CmdError> {
+    let conn = state.current()?;
+    Ok(git::search(&conn, &dir, &query, regex, case_sensitive, word).await?)
+}
+
 #[derive(Serialize)]
 struct DiffOut {
     /// Both sides as text; `None` when either side is not UTF-8 text.
@@ -742,8 +766,24 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .build()?;
     let file = SubmenuBuilder::new(app, "File")
         .item(
+            &MenuItemBuilder::with_id("switch-workspace", "Switch Workspace…")
+                .accelerator("CmdOrCtrl+Alt+O")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("new-workspace", "New Workspace…")
+                .accelerator("CmdOrCtrl+Shift+N")
+                .build(app)?,
+        )
+        .separator()
+        .item(
             &MenuItemBuilder::with_id("go-to-file", "Go to File…")
                 .accelerator("CmdOrCtrl+P")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("find-in-folder", "Find in Folder…")
+                .accelerator("CmdOrCtrl+Shift+F")
                 .build(app)?,
         )
         .separator()
@@ -806,6 +846,7 @@ fn main() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             connect,
+            open_folder,
             disconnect,
             list_dir,
             read_file,
@@ -822,6 +863,7 @@ fn main() {
             git_commit_files,
             git_diff,
             git_files,
+            search,
             quit_app,
             copy_text,
             copy_png,
@@ -835,7 +877,8 @@ fn main() {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" if request_quit(app) => app.exit(0),
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
-            | "toggle-sidebar" | "markdown-preview") => {
+            | "toggle-sidebar" | "markdown-preview" | "switch-workspace"
+            | "new-workspace" | "find-in-folder") => {
                 let _ = app.emit("menu", id);
             }
             _ => {}

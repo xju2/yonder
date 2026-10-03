@@ -1,10 +1,11 @@
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "./api";
-import { Editors } from "./editor";
-import { Finder } from "./finder";
+import { baseName, Editors } from "./editor";
+import { Finder, Picker } from "./finder";
 import { GitPanel } from "./git";
-import { ask, askText } from "./modal";
+import { ask, askText, tell } from "./modal";
+import { SearchPanel } from "./search";
 import { TerminalPanel } from "./terminal";
 import { FileTree } from "./tree";
 
@@ -23,7 +24,10 @@ const statusConn = $("status-conn");
 const statusMsg = $("status-msg");
 
 let conn: api.ConnInfo | null = null;
+/** The open workspace as typed: what reconnecting connects to. */
 let target = { host: "", folder: "" };
+/** The open workspace as resolved: host and folder. */
+let wsKey: string | null = null;
 
 // ---- recent connections (a per-machine convenience; failures are harmless)
 
@@ -109,12 +113,20 @@ void api.onAskpass(async ({ id, prompt }) => {
   await api.askpassAnswer(id, answer);
 });
 
+/** The connection dropped while another attempt ran; that attempt decides. */
+let droppedWhileConnecting: string | null = null;
+
 void api.onClosed((e) => {
   if (!conn || e.generation !== conn.generation) return;
+  if (connecting) droppedWhileConnecting = e.reason;
+  else connectionLost(e.reason);
+});
+
+function connectionLost(reason: string) {
   statusConn.classList.add("down");
   terminals.disconnected();
-  scheduleReconnect(e.reason);
-});
+  scheduleReconnect(reason);
+}
 
 // ---- reconnecting on its own
 
@@ -182,6 +194,7 @@ async function reconnectNow() {
     // The folder may resolve differently now (a moved symlink, say).
     if (info.root === oldRoot) await tree.refresh();
     else await tree.setRoot(info.root);
+    wsKey = `${info.host}:${info.root}`;
     void git.refreshChanges();
     status(`Reconnected to ${info.host}`);
   } catch (err) {
@@ -194,6 +207,7 @@ async function reconnectNow() {
     }
   } finally {
     connecting = false;
+    droppedWhileConnecting = null;
   }
 }
 
@@ -234,6 +248,14 @@ const refreshTree = () => {
 const tree = new FileTree($("tree"), (path) => void editors.open(path), (path) =>
   pathMenu(path, refreshTree),
 );
+
+/** Show `path` in the file tree: double-clicking a tab does this. */
+async function reveal(path: string) {
+  workspace.classList.remove("sidebar-hidden");
+  await showSideView("files");
+  if (!(await tree.reveal(path))) status(`${baseName(path)} is not in the folder's tree.`);
+}
+
 const editors = new Editors(
   $("editor"),
   $("viewer"),
@@ -245,10 +267,18 @@ const editors = new Editors(
   (pos) => ($("status-pos").textContent = pos),
   () => void git.refreshChanges(),
   pathMenu,
+  (path) => void reveal(path),
 );
+const picker = new Picker();
 const finder = new Finder(
+  picker,
   () => (conn && !workspace.hidden ? conn.root : null),
   (path) => void editors.open(path),
+);
+const search = new SearchPanel(
+  $("search-view"),
+  () => conn?.root ?? null,
+  (path, at) => void editors.open(path, at),
 );
 
 const toggleSidebar = () => workspace.classList.toggle("sidebar-hidden");
@@ -256,8 +286,16 @@ $("toggle-sidebar").addEventListener("click", toggleSidebar);
 
 // Menu items, so their shortcuts work wherever the keyboard is.
 void api.onMenu((id) => {
-  if (!conn || workspace.hidden) return;
-  if (id === "go-to-file") void finder.open();
+  if (!conn || document.querySelector("dialog[open]")) return;
+  if (id === "new-workspace") return showConnect();
+  if (workspace.hidden) return;
+  if (id === "go-to-file") finder.open();
+  else if (id === "switch-workspace") pickWorkspace();
+  else if (id === "find-in-folder") {
+    workspace.classList.remove("sidebar-hidden");
+    void showSideView("search");
+    search.focus(editors.selection());
+  }
   else if (id === "toggle-sidebar") toggleSidebar();
   else if (id === "markdown-preview") editors.togglePreview();
   else if (id === "copy-path") void copyPath(tree.chosen(), false);
@@ -302,7 +340,7 @@ async function startSession(info: api.ConnInfo) {
   banner.hidden = true;
   statusConn.classList.remove("down");
   statusConn.textContent = `${info.host}:${info.root}`;
-  statusConn.title = `Connected to ${info.hostname}`;
+  statusConn.title = `Connected to ${info.hostname}. Click to switch workspace (⌥⌘O).`;
   const home = info.home.replace(/\/$/, "");
   const shown =
     info.root === home ? "~" : info.root.startsWith(home + "/") ? "~" + info.root.slice(home.length) : info.root;
@@ -313,39 +351,124 @@ async function startSession(info: api.ConnInfo) {
   void getCurrentWindow().setTitle(title);
 }
 
+// ---- workspaces: one folder on one host each, switched in this window
+
+/**
+ * Open `folder` on `host`, putting the current workspace aside: its tabs,
+ * unsaved edits and tree come back as they were when it is opened again.
+ * Another folder on the same host reuses the connection.
+ */
+async function openWorkspace(host: string, folder: string): Promise<boolean> {
+  if (connecting) return false;
+  const sameHost = !!conn && conn.host === host && !statusConn.classList.contains("down");
+  if (conn && !sameHost && terminals.hasLive()) {
+    const choice = await ask(`Terminals on ${conn.host} will be closed.`, [
+      { value: "cancel", label: "Cancel", primary: true },
+      { value: "switch", label: "Close them and switch", danger: true },
+    ]);
+    if (choice !== "switch") return false;
+  }
+  connecting = true;
+  let ok = false;
+  try {
+    let info: api.ConnInfo;
+    if (sameHost) {
+      info = { ...conn!, root: await api.openFolder(folder || "~") };
+    } else {
+      info = await api.connect(host, folder || "~");
+      // The old host's shells ended with its connection.
+      terminals.disconnected();
+      terminals.closeAll();
+    }
+    ok = true;
+    target = { host, folder };
+    saveRecent(target);
+    await startSession(info);
+    const key = `${info.host}:${info.root}`;
+    if (key !== wsKey) {
+      editors.switchTo(wsKey, key);
+      search.reset();
+      const from = wsKey;
+      wsKey = key;
+      await tree.switchTo(from, key, info.root);
+    }
+    void git.refreshChanges();
+  } catch (err) {
+    const ce = api.asError(err);
+    if (connectView.hidden) {
+      void tell(`Could not open ${host}:${folder || "~"}.`, [ce.message, ce.hint].filter(Boolean).join("\n\n"));
+    } else {
+      connectError.replaceChildren();
+      const msg = document.createElement("p");
+      msg.textContent = ce.message;
+      connectError.append(msg);
+      if (ce.hint) {
+        const hint = document.createElement("p");
+        hint.className = "hint";
+        hint.textContent = ce.hint;
+        connectError.append(hint);
+      }
+      connectError.hidden = false;
+    }
+  } finally {
+    connecting = false;
+    const dropped = droppedWhileConnecting;
+    droppedWhileConnecting = null;
+    if (!ok && dropped) connectionLost(dropped);
+  }
+  return ok;
+}
+
+/** Switch Workspace (⌥⌘O): pick a recent folder. */
+function pickWorkspace() {
+  const label = (r: Recent) => `${r.host}:${r.folder || "~"}`;
+  const others = new Map(
+    loadRecent()
+      .filter((r) => r.host !== target.host || r.folder !== target.folder)
+      .map((r) => [label(r), r]),
+  );
+  void picker.open("Switch workspace", [...others.keys()], (item) => {
+    const r = others.get(item)!;
+    status(`Opening ${item}…`);
+    void openWorkspace(r.host, r.folder);
+  });
+}
+
+/** New Workspace (⇧⌘N): the connect screen, with a way back. */
+function showConnect() {
+  connectView.hidden = false;
+  workspace.hidden = true;
+  connectError.hidden = true;
+  connectLog.replaceChildren();
+  $("connect-cancel").hidden = !conn;
+  hostInput.value = conn?.host ?? "";
+  folderInput.value = "";
+  paintRecent();
+  (conn ? folderInput : hostInput).focus();
+}
+
+function hideConnect() {
+  if (!conn || connecting) return;
+  connectView.hidden = true;
+  workspace.hidden = false;
+}
+
+$("connect-cancel").addEventListener("click", hideConnect);
+connectView.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideConnect();
+});
+statusConn.addEventListener("click", pickWorkspace);
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (connecting) return;
-  connecting = true;
-  target = { host: hostInput.value.trim(), folder: folderInput.value.trim() };
   connectLog.replaceChildren();
   connectError.hidden = true;
   connectBtn.disabled = true;
   connectBtn.textContent = "Connecting…";
-  try {
-    const info = await api.connect(target.host, target.folder || "~");
-    saveRecent(target);
-    await startSession(info);
-    await tree.setRoot(info.root);
-    void git.refreshChanges();
-  } catch (err) {
-    const ce = api.asError(err);
-    connectError.replaceChildren();
-    const msg = document.createElement("p");
-    msg.textContent = ce.message;
-    connectError.append(msg);
-    if (ce.hint) {
-      const hint = document.createElement("p");
-      hint.className = "hint";
-      hint.textContent = ce.hint;
-      connectError.append(hint);
-    }
-    connectError.hidden = false;
-  } finally {
-    connecting = false;
-    connectBtn.disabled = false;
-    connectBtn.textContent = "Connect";
-  }
+  await openWorkspace(hostInput.value.trim(), folderInput.value.trim());
+  connectBtn.disabled = false;
+  connectBtn.textContent = "Connect";
 });
 
 $("refresh-tree").addEventListener("click", refreshTree);
@@ -362,7 +485,7 @@ window.addEventListener("focus", () => {
 
 // ---- sidebar views: Files, Changes, History
 
-type SideView = "files" | "changes" | "history";
+type SideView = "files" | "changes" | "history" | "search";
 let sideView: SideView = "files";
 const git = new GitPanel(
   $("changes-view"),
@@ -382,6 +505,7 @@ async function showSideView(view: SideView) {
   $("files-view").hidden = view !== "files";
   $("changes-view").hidden = view !== "changes";
   $("history-view").hidden = view !== "history";
+  $("search-view").hidden = view !== "search";
   // Changes are re-read each time: they move with every save.
   if (view === "changes") await git.refreshChanges();
   if (view === "history") await git.showHistory();

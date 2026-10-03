@@ -55,6 +55,8 @@ export function asError(e: unknown): CmdError {
 
 export const connect = (host: string, path: string) =>
   invoke<ConnInfo>("connect", { host, path });
+/** Resolve another folder on the connected host; no new ssh session. */
+export const openFolder = (path: string) => invoke<string>("open_folder", { path });
 export const disconnect = () => invoke<void>("disconnect");
 export const listDir = (path: string) => invoke<Entry[]>("list_dir", { path });
 export const readFile = (path: string) => invoke<FileContent>("read_file", { path });
@@ -163,6 +165,16 @@ export const gitDiff = (repo: string, path: string, oldPath: string | null, rev:
 
 /** Files under `dir` that git does not ignore, relative to it; null outside a repository. */
 export const gitFiles = (dir: string) => invoke<string[] | null>("git_files", { dir });
+
+export interface SearchMatch {
+  /** Relative to the searched folder. */
+  path: string;
+  line: number;
+  text: string;
+}
+/** Lines matching `query` in the files under `dir` that git does not ignore. */
+export const search = (dir: string, query: string, regex: boolean, caseSensitive: boolean, word: boolean) =>
+  invoke<{ matches: SearchMatch[]; truncated: boolean }>("search", { dir, query, regex, caseSensitive, word });
 
 // ---- quitting
 

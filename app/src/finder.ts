@@ -1,7 +1,7 @@
 // Go to File (Cmd+P): type part of a path, pick a match, open it in a tab.
 // In a git repository the list comes from `git ls-files`, which skips
 // ignored files and is quick even on network filesystems; elsewhere the
-// folder is walked, up to a limit.
+// folder is walked, up to a limit. The same dialog switches workspaces.
 
 import { asError, gitFiles, listDir } from "./api";
 import { joinPath } from "./tree";
@@ -61,16 +61,19 @@ export function score(query: string, path: string): number {
   return s - p.length / 1000;
 }
 
-export class Finder {
-  private files: string[] = [];
-  private filesRoot = "";
+/**
+ * The quick-pick dialog: type part of an item, choose a match. Go to File
+ * and Switch Workspace both use it.
+ */
+export class Picker {
+  private items: string[] = [];
+  private loading = false;
   private matches: string[] = [];
   private selected = 0;
+  private onPick: (item: string) => void = () => {};
+  private run = 0;
 
-  constructor(
-    private root: () => string | null,
-    private onOpen: (path: string) => void,
-  ) {
+  constructor() {
     input.addEventListener("input", () => this.filter());
     input.addEventListener("keydown", (e) => {
       const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
@@ -84,22 +87,33 @@ export class Finder {
     });
   }
 
-  async open() {
-    const root = this.root();
-    if (!root || dialog.open) return;
-    if (root !== this.filesRoot) this.files = [];
+  /** Offer `items`; `fresh`, if given, replaces them when it arrives. */
+  async open(
+    label: string,
+    items: string[],
+    onPick: (item: string) => void,
+    fresh?: Promise<string[]>,
+  ) {
+    if (dialog.open) return;
+    const run = ++this.run;
+    this.items = items;
+    this.onPick = onPick;
+    this.loading = !!fresh;
+    dialog.setAttribute("aria-label", label);
+    input.placeholder = `${label}…`;
     input.value = "";
     this.filter();
     dialog.showModal();
-    // Re-list each time: files come and go. The old list shows meanwhile.
+    if (!fresh) return;
     try {
-      const files = (await gitFiles(root)) ?? (await walk(root));
-      if (this.root() !== root) return;
-      this.files = files;
-      this.filesRoot = root;
+      const got = await fresh;
+      if (run !== this.run) return;
+      this.items = got;
     } catch (e) {
-      if (!this.files.length) this.note(asError(e).message);
+      if (run === this.run && !this.items.length) this.note(asError(e).message);
       return;
+    } finally {
+      if (run === this.run) this.loading = false;
     }
     if (dialog.open) this.filter();
   }
@@ -107,13 +121,13 @@ export class Finder {
   private filter() {
     const q = input.value.trim();
     this.matches = q
-      ? this.files
+      ? this.items
           .map((f) => [score(q, f), f] as const)
           .filter(([s]) => s >= 0)
           .sort((a, b) => b[0] - a[0])
           .slice(0, SHOWN)
           .map(([, f]) => f)
-      : this.files.slice(0, SHOWN);
+      : this.items.slice(0, SHOWN);
     list.replaceChildren(
       ...this.matches.map((f, i) => {
         const li = document.createElement("li");
@@ -129,7 +143,7 @@ export class Finder {
         return li;
       }),
     );
-    if (!this.matches.length) this.note(this.files.length ? "No matching files." : "Listing files…");
+    if (!this.matches.length) this.note(this.loading && !this.items.length ? "Listing…" : "No matches.");
     this.select(0);
   }
 
@@ -151,9 +165,36 @@ export class Finder {
 
   private pick(i: number) {
     const f = this.matches[i];
-    const root = this.root();
-    if (!f || !root) return;
+    if (!f) return;
     dialog.close();
-    this.onOpen(joinPath(root, f));
+    this.onPick(f);
+  }
+}
+
+export class Finder {
+  private files: string[] = [];
+  private filesRoot = "";
+
+  constructor(
+    private picker: Picker,
+    private root: () => string | null,
+    private onOpen: (path: string) => void,
+  ) {}
+
+  open() {
+    const root = this.root();
+    if (!root) return;
+    if (root !== this.filesRoot) this.files = [];
+    // Re-list each time: files come and go. The old list shows meanwhile.
+    const fresh = gitFiles(root)
+      .then((files) => files ?? walk(root))
+      .then((files) => {
+        if (this.root() === root) {
+          this.files = files;
+          this.filesRoot = root;
+        }
+        return files;
+      });
+    void this.picker.open("Go to file", this.files, (f) => this.onOpen(joinPath(root, f)), fresh);
   }
 }

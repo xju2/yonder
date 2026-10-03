@@ -298,6 +298,79 @@ pub async fn files(conn: &Connection, dir: &str) -> Result<Option<Vec<String>>, 
     ))
 }
 
+/// Search output past this is cut off; the results say so.
+const MAX_SEARCH: u64 = 8 << 20;
+/// At most this many matching lines are returned.
+const MAX_MATCHES: usize = 20_000;
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct Match {
+    /// Relative to the searched folder.
+    pub path: String,
+    pub line: u32,
+    pub text: String,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct Found {
+    pub matches: Vec<Match>,
+    /// There were more matches than were returned.
+    pub truncated: bool,
+}
+
+/// Lines matching `pattern` in the text files under `dir` that git does not
+/// ignore. Works outside repositories too (`--no-index`).
+pub async fn search(
+    conn: &Connection,
+    dir: &str,
+    pattern: &str,
+    regex: bool,
+    case_sensitive: bool,
+    word: bool,
+) -> Result<Found, Error> {
+    let mut args = vec!["grep", "--no-index", "--exclude-standard", "-n", "-z", "-I"];
+    args.push(if regex { "-E" } else { "-F" });
+    if !case_sensitive {
+        args.push("-i");
+    }
+    if word {
+        args.push("-w");
+    }
+    args.extend(["-e", pattern]);
+    let out = git(conn, dir, &args, MAX_SEARCH).await?;
+    // 1: nothing matched. A cut-off run was stopped, so it has no code.
+    if !out.truncated && !matches!(out.code, Some(0 | 1)) {
+        return Err(Error::new(ErrorKind::Other, out.stderr.trim()));
+    }
+    let mut found = parse_grep(&out.stdout);
+    found.truncated |= out.truncated;
+    Ok(found)
+}
+
+/// Parse `git grep -n -z`: `path\0line\0text\n` per match.
+pub fn parse_grep(out: &[u8]) -> Found {
+    let mut found = Found::default();
+    for record in out.split(|&b| b == b'\n') {
+        let mut f = record.splitn(3, |&b| b == 0);
+        let (Some(path), Some(line), Some(text)) = (f.next(), f.next(), f.next()) else {
+            continue; // the cut-off end
+        };
+        let Some(line) = std::str::from_utf8(line).ok().and_then(|l| l.parse().ok()) else {
+            continue;
+        };
+        if found.matches.len() == MAX_MATCHES {
+            found.truncated = true;
+            break;
+        }
+        found.matches.push(Match {
+            path: String::from_utf8_lossy(path).into_owned(),
+            line,
+            text: String::from_utf8_lossy(text).into_owned(),
+        });
+    }
+    found
+}
+
 /// Files a commit changed, compared with its first parent.
 pub async fn commit_files(conn: &Connection, repo: &str, hash: &str) -> Result<Vec<Change>, Error> {
     let out = git_ok(
@@ -431,6 +504,25 @@ bbbb\x1fbb\x1fBo\x1f1690000000\x1fp1 p2\x1fMerge branch 'x'\x1e\n";
         assert!(!log[0].merge);
         assert!(log[1].merge);
         assert_eq!(log[1].author, "Bo");
+    }
+
+    #[test]
+    fn grep_matches() {
+        let out = b"src/a.rs\x0012\x00    let x = 1;\nb c.txt\x003\x00x: y\x00z\nsrc/cut\x004";
+        let found = parse_grep(out);
+        let got: Vec<_> = found
+            .matches
+            .iter()
+            .map(|m| (m.path.as_str(), m.line, m.text.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("src/a.rs", 12, "    let x = 1;"),
+                ("b c.txt", 3, "x: y\0z")
+            ]
+        );
+        assert!(!found.truncated);
     }
 
     #[test]
