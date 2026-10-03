@@ -339,6 +339,12 @@ struct FileOut {
     /// Content hash as hex: JavaScript numbers cannot hold a u64 exactly.
     hash: String,
     size: u64,
+    /// As [`StatOut::version`], so a later stat shows whether it changed.
+    version: String,
+}
+
+fn version_of(s: &yonder_proto::FileStat) -> String {
+    format!("{}:{}.{:09}", s.size, s.mtime_s, s.mtime_ns)
 }
 
 #[tauri::command]
@@ -363,6 +369,7 @@ async fn read_file(
                 text,
                 hash: format!("{hash:016x}"),
                 size: stat.size,
+                version: version_of(&stat),
             })
         }
         other => Err(unexpected(other)),
@@ -399,7 +406,7 @@ async fn stat(state: State<'_, AppState>, conn: u64, path: String) -> Result<Sta
     match state.get(conn)?.call(Op::Stat { path }).await? {
         Reply::Stat(s) => Ok(StatOut {
             size: s.size,
-            version: format!("{}:{}.{:09}", s.size, s.mtime_s, s.mtime_ns),
+            version: version_of(&s),
         }),
         other => Err(unexpected(other)),
     }
@@ -653,6 +660,7 @@ async fn git_diff(
 struct WrittenOut {
     hash: String,
     size: u64,
+    version: String,
 }
 
 /// Save `text`. With `expected_hash` the save is refused (kind "conflict") if
@@ -682,6 +690,7 @@ async fn write_file(
         Reply::Written { hash, stat } => Ok(WrittenOut {
             hash: format!("{hash:016x}"),
             size: stat.size,
+            version: version_of(&stat),
         }),
         other => Err(unexpected(other)),
     }

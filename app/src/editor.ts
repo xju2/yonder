@@ -119,9 +119,9 @@ interface Tab {
   el: HTMLElement;
   /** Image or PDF viewer, for files that are shown rather than edited. */
   viewer: Viewer | null;
-  /** The remote file's size and mtime when the viewer last loaded it. */
+  /** The remote file's size and mtime when last read or saved. */
   version: string | null;
-  /** The viewer's pending load or reload; the next one waits for it. */
+  /** The pending load or reload; the next one waits for it. */
   loading: Promise<void> | null;
   /** A read-only comparison, for diff tabs. */
   diff: { original: monaco.editor.ITextModel; modified: monaco.editor.ITextModel } | null;
@@ -272,7 +272,7 @@ export class Editors {
       view: null,
       el: document.createElement("div"),
       viewer: null,
-      version: null,
+      version: file.version,
       loading: null,
       diff: null,
       label: null,
@@ -453,13 +453,13 @@ export class Editors {
     return this.diffEditor;
   }
 
-  /** Re-check the active image or PDF and reload it if it changed on the remote. */
+  /** Re-check the active file and reload it if it changed on the remote. */
   refreshActive() {
-    if (this.active?.viewer) void this.refreshViewer(this.active);
+    if (this.active) void this.refreshViewer(this.active);
   }
 
   /**
-   * Reload the tab's viewer if its file changed (always, with `force`).
+   * Reload the tab if its file changed (a viewer always, with `force`).
    * One load per tab at a time, so an older file never replaces a newer one;
    * a check requested while another is queued joins it.
    */
@@ -475,6 +475,7 @@ export class Editors {
   }
 
   private async reloadIfChanged(tab: Tab, force: boolean) {
+    if (tab.model) return this.reloadTextIfChanged(tab);
     const viewer = tab.viewer;
     if (!viewer) return;
     const name = baseName(tab.path);
@@ -494,6 +495,40 @@ export class Editors {
     }
   }
 
+  /**
+   * A text file a job or `git pull` rewrote: take the new text if there are
+   * no unsaved edits, as an edit that Undo takes back. With unsaved edits it
+   * is only reported; saving then asks what to do.
+   */
+  private async reloadTextIfChanged(tab: Tab) {
+    const model = tab.model!;
+    const name = baseName(tab.path);
+    try {
+      const s = await stat(tab.path);
+      if (s.version === tab.version || model.isDisposed()) return;
+      if (this.isDirty(tab)) {
+        tab.version = s.version;
+        this.status(`${name} changed on the remote. Saving will ask before overwriting it.`);
+        return;
+      }
+      const file = await readFile(tab.path);
+      // Typing while it was read wins; saving will ask.
+      if (model.isDisposed() || this.isDirty(tab)) return;
+      tab.version = file.version;
+      if (file.hash === tab.hash || file.text === null) return;
+      const view = this.active === tab ? this.editor.saveViewState() : null;
+      model.pushEditOperations([], [{ range: model.getFullModelRange(), text: file.text }], () => null);
+      if (view && this.active === tab) this.editor.restoreViewState(view);
+      tab.hash = file.hash;
+      tab.savedVersion = model.getAlternativeVersionId();
+      this.paintTab(tab);
+      this.status(`Reloaded ${name}: it changed on the remote.`);
+    } catch (e) {
+      const err = asError(e);
+      if (err.kind === "not_found") this.status(`${name} no longer exists on the remote.`);
+    }
+  }
+
   /** Save the active tab, resolving conflicts with the person. */
   async save(tab = this.active) {
     if (!tab?.model) return;
@@ -506,6 +541,7 @@ export class Editors {
       try {
         const w = await writeFile(tab.path, text, expected);
         tab.hash = w.hash;
+        tab.version = w.version;
         tab.savedVersion = version;
         this.paintTab(tab);
         this.status(`Saved ${name}`);
@@ -546,6 +582,7 @@ export class Editors {
       if (!tab.model || file.text === null) return;
       tab.model.setValue(file.text);
       tab.hash = file.hash;
+      tab.version = file.version;
       tab.savedVersion = tab.model.getAlternativeVersionId();
       this.paintTab(tab);
       this.status(`Reloaded ${baseName(tab.path)}`);
@@ -673,11 +710,10 @@ export class Editors {
       if (tab.view) this.editor.restoreViewState(tab.view);
       if (!preview) this.editor.focus();
     }
-    if (viewer) {
-      this.position(viewer.info());
-      // A plot may have been regenerated while another tab was showing.
-      void this.refreshViewer(tab!);
-    }
+    if (viewer) this.position(viewer.info());
+    // A plot may have been regenerated, or a file rewritten, while another
+    // tab was showing.
+    if (viewer || tab?.model) void this.refreshViewer(tab!);
     tab?.el.scrollIntoView({ block: "nearest", inline: "nearest" });
     this.onActive(tab?.path ?? null);
   }

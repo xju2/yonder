@@ -24,6 +24,11 @@ dialog. Cancel ends that login attempt.
 - **Save:** <kbd>Cmd</kbd>+<kbd>S</kbd>. If the file changed on the remote
   since you opened it (a batch job rewrote it, say), Yonder asks before
   overwriting.
+- **Files changed elsewhere:** when you come back to the window or switch
+  tabs, an open file that a job or `git pull` rewrote is reloaded. If it has
+  no unsaved edits, the new text replaces it and <kbd>Cmd</kbd>+<kbd>Z</kbd>
+  brings yours back. If it has unsaved edits, the status bar tells you, and
+  saving asks first.
 - **Workspaces:** each is one folder on one host. <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>O</kbd>
   (or clicking the host:folder in the status bar) switches to a recent one;
   <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> opens a new one. The workspace you
@@ -138,8 +143,8 @@ agent through a stand-in for `ssh`.
 ## Roadmap
 
 1. **Connect and edit** — done.
-2. **Watching and terminal:** terminal tabs are done; periodic re-listing of
-   open folders and open files is next.
+2. **Watching and terminal** — done: terminal tabs; the tree and open files
+   are re-read when the window regains focus.
 3. **Git and viewers** — done: changed files and history with diffs; image
    and PDF viewers.
 4. **Hardening:** automatic reconnect, password and MFA prompts, and asking

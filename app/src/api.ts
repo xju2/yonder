@@ -23,11 +23,14 @@ export interface FileContent {
   text: string | null;
   hash: string;
   size: number;
+  /** As Stat.version: whether the file changed since. */
+  version: string;
 }
 
 export interface Written {
   hash: string;
   size: number;
+  version: string;
 }
 
 export type ErrorKind =
