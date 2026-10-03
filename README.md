@@ -51,7 +51,8 @@ dialog. Cancel ends that login attempt.
   `compile_commands.json`). With none, the status bar says what to install.
 - **Notebooks:** a `.ipynb` file opens in JupyterLab (or Notebook) in a tab.
   Yonder starts Jupyter on the remote in the workspace folder, using the one
-  in the folder's `.venv`, `venv` or `env` first, so its kernel is that
+  in the nearest `.venv`, `venv` or `env` (uv's included), looked for from the
+  notebook's folder up to the workspace folder, so its kernel is that
   environment's Python; otherwise `jupyter` from `PATH`. The page comes through
   the existing connection: no second login and no port opened to the network.
   One Jupyter runs per workspace while connected, so a kernel survives closing
