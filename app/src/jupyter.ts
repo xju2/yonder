@@ -41,6 +41,11 @@ with open(os.path.join(d, "kernel.json"), "w") as f:
 PY
   then export JUPYTER_PATH="$kdir\${JUPYTER_PATH:+:$JUPYTER_PATH}"; fi
 fi
+# In the app's frame the page's cookies count as third-party and WebKit
+# drops them, so the kernel's WebSocket must carry the token itself.
+cfg="$HOME/.cache/yonder/jupyter/config"
+mkdir -p "$cfg/labconfig" && printf '{"appendToken": "true"}\n' > "$cfg/labconfig/page_config.json"
+export JUPYTER_CONFIG_PATH="$cfg\${JUPYTER_CONFIG_PATH:+:$JUPYTER_CONFIG_PATH}"
 csp='{"headers":{"Content-Security-Policy":"frame-ancestors tauri: http://localhost:*"}}'
 set -- --no-browser --ip=127.0.0.1 --port=8888 --port-retries=200 --ServerApp.root_dir="$PWD" --ServerApp.tornado_settings="$csp"
 if command -v jupyter-lab >/dev/null 2>&1; then echo "yonder-jupyter: lab" >&2; exec jupyter-lab "$@"; fi
