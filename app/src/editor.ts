@@ -155,6 +155,8 @@ export class Editors {
     private onTabMenu: (path: string, reload: (() => void) | null) => void,
     /** A tab was double-clicked: show its file in the tree. */
     private onReveal: (path: string) => void,
+    /** The Jupyter page for a notebook; it may take a while to start. */
+    private notebookPage: (path: string) => Promise<string>,
   ) {
     this.editor = monaco.editor.create(host, {
       model: null,
@@ -242,6 +244,7 @@ export class Editors {
     if (existing) return this.show(existing);
     const kind = viewKindFor(path);
     if (kind) return this.openViewer(path, kind, quiet);
+    if (/\.ipynb$/i.test(path)) return this.openNotebook(path);
     this.status(`Opening ${baseName(path)}…`);
     const gen = this.generation;
     let file;
@@ -356,6 +359,44 @@ export class Editors {
       if (tab.loading === first) tab.loading = null;
       firstLoaded();
     }
+  }
+
+  /** A notebook, in Jupyter on the remote. */
+  private async openNotebook(path: string) {
+    const name = baseName(path);
+    const tab: Tab = {
+      path,
+      model: null,
+      note: `Starting Jupyter for ${name}…`,
+      hash: null,
+      savedVersion: 0,
+      view: null,
+      el: document.createElement("div"),
+      viewer: null,
+      version: null,
+      loading: null,
+      diff: null,
+      label: null,
+      preview: null,
+    };
+    this.buildTab(tab);
+    this.tabs.push(tab);
+    this.show(tab);
+    try {
+      const url = await this.notebookPage(path);
+      if (!this.tabs.includes(tab) && ![...this.kept.values()].some((k) => k.tabs.includes(tab))) return;
+      const frame = document.createElement("iframe");
+      frame.className = "notebook";
+      // Its own origin, so it cannot reach the app; no top navigation.
+      frame.sandbox.value =
+        "allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads";
+      frame.allow = "clipboard-read; clipboard-write";
+      frame.src = url;
+      tab.preview = frame;
+    } catch (e) {
+      tab.note = `Could not open ${name} in Jupyter. ${e instanceof Error ? e.message : asError(e).message}`;
+    }
+    if (this.active === tab) this.show(tab);
   }
 
   /** Open a read-only comparison of one file. */
@@ -703,7 +744,7 @@ export class Editors {
     // Re-attaching a frame reloads it; leave one that is already showing.
     if (!shown) this.viewerHost.replaceChildren();
     else if (this.viewerHost.firstChild !== shown) this.viewerHost.replaceChildren(shown);
-    this.placeholder.hidden = hasText || !!viewer || !!diff;
+    this.placeholder.hidden = hasText || !!viewer || !!diff || !!preview;
     this.placeholder.textContent = tab ? tab.note : "Open a file from the tree.";
     this.editor.setModel(tab?.model ?? null);
     if (tab?.model) {

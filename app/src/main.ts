@@ -4,6 +4,7 @@ import * as api from "./api";
 import { baseName, Editors } from "./editor";
 import { Finder, Picker } from "./finder";
 import { GitPanel } from "./git";
+import { Jupyter } from "./jupyter";
 import { Languages } from "./lsp";
 import { ask, askText, tell } from "./modal";
 import { SearchPanel } from "./search";
@@ -277,7 +278,9 @@ const editors = new Editors(
   () => void git.refreshChanges(),
   pathMenu,
   (path) => void reveal(path),
+  (path) => jupyter.page(conn!.host, conn!.root, path),
 );
+const jupyter = new Jupyter((host) => hosts.get(host)?.generation ?? null);
 new Languages(
   () => (conn ? { host: conn.host, root: conn.root } : null),
   (host) => hosts.get(host)?.generation ?? null,

@@ -49,6 +49,14 @@ dialog. Cancel ends that login attempt.
   remote: basedpyright, pyright or pylsp from the folder's `.venv`, `venv` or
   `env` first, then `PATH`; clangd from `PATH` (it reads
   `compile_commands.json`). With none, the status bar says what to install.
+- **Notebooks:** a `.ipynb` file opens in JupyterLab (or Notebook) in a tab.
+  Yonder starts Jupyter on the remote in the workspace folder, using the one
+  in the folder's `.venv`, `venv` or `env` first, so its kernel is that
+  environment's Python; otherwise `jupyter` from `PATH`. The page comes through
+  the existing connection: no second login and no port opened to the network.
+  One Jupyter runs per workspace while connected, so a kernel survives closing
+  its tab; it stops when the connection ends. Jupyter saves notebooks itself,
+  so Yonder's quit check does not cover them.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
