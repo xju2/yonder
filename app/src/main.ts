@@ -242,10 +242,17 @@ const pathMenu = (path: string, reload: (() => void) | null = null) =>
   void Menu.new({
     items: [
       ...(reload ? [{ text: "Reload", action: reload }] : []),
+      ...(/\.ipynb$/i.test(path) && conn ? [{ text: "Show Jupyter Log", action: showJupyterLog }] : []),
       { text: "Copy Path", action: () => void copyPath(path, false) },
       { text: "Copy Relative Path", action: () => void copyPath(path, true) },
     ],
   }).then((m) => m.popup());
+
+function showJupyterLog() {
+  const log = conn && jupyter.log(conn.host, conn.root);
+  const lines = (log ?? "").trim().split("\n").slice(-60).join("\n");
+  void tell("Jupyter log", lines || "Jupyter has not been started in this workspace.");
+}
 
 const refreshTree = () => {
   void tree.refresh();

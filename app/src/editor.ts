@@ -708,8 +708,11 @@ export class Editors {
     tab.el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       // Reload would throw away unsaved edits, so those tabs don't offer it.
+      const frame = /\.ipynb$/i.test(tab.path) ? tab.preview : null;
       const reload = tab.viewer
         ? () => void this.refreshViewer(tab, true)
+        : frame
+          ? () => (frame.src = frame.src)
         : tab.model && !this.isDirty(tab)
           ? () => void this.reload(tab)
           : null;

@@ -52,6 +52,8 @@ type Found = { base: string; token: string; lab: boolean };
 
 export class Jupyter {
   private servers = new Map<string, Promise<Found>>();
+  /** The end of each server's log, kept after it stops. */
+  private logs = new Map<string, string>();
 
   constructor(private connOf: (host: string) => number | null) {}
 
@@ -69,7 +71,7 @@ export class Jupyter {
       // ponytail: one Jupyter per workspace, from the venv nearest the first
       // notebook opened; key by venv if notebooks in one folder need several.
       const dir = path.slice(0, path.lastIndexOf("/"));
-      const started: Promise<Found> = this.start(conn, rootDir, dir, () => {
+      const started: Promise<Found> = this.start(conn, rootDir, dir, key, () => {
         if (this.servers.get(key) === started) this.servers.delete(key);
       });
       this.servers.set(key, (s = started));
@@ -86,7 +88,13 @@ export class Jupyter {
     return `http://127.0.0.1:${local}/${found.lab ? "lab/tree" : "notebooks"}/${rel}?token=${found.token}`;
   }
 
-  private start(conn: number, root: string, dir: string, ended: () => void): Promise<Found> {
+  /** The end of the workspace's Jupyter log, token hidden; null if none ran. */
+  log(host: string, root: string): string | null {
+    const log = this.logs.get(`${this.connOf(host)}:${root.replace(/\/$/, "")}`);
+    return log === undefined ? null : log.replace(/token=[0-9a-zA-Z]+/g, "token=…");
+  }
+
+  private start(conn: number, root: string, dir: string, key: string, ended: () => void): Promise<Found> {
     let log = "";
     let lab = true;
     return new Promise<Found>((resolve, reject) => {
@@ -96,8 +104,9 @@ export class Jupyter {
         root,
         script(dir),
         (data) => {
+          log = (log + new TextDecoder().decode(data)).slice(-20000);
+          this.logs.set(key, log);
           if (done) return;
-          log = (log + new TextDecoder().decode(data)).slice(-8000);
           if (/yonder-jupyter: notebook/.test(log)) lab = false;
           const m = /http:\/\/(?:127\.0\.0\.1|localhost):(\d+)\/\S*?[?&]token=([0-9a-zA-Z]+)/.exec(log);
           if (m) {
