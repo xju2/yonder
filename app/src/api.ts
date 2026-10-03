@@ -53,25 +53,32 @@ export function asError(e: unknown): CmdError {
   return { kind: "other", message: String(e), hint: null };
 }
 
+/**
+ * The connection that calls go to: the open workspace's. Each call takes it
+ * when made, so one that started before a switch stays with its host.
+ */
+let conn = 0;
+export const useConnection = (id: number) => (conn = id);
+
 export const connect = (host: string, path: string) =>
   invoke<ConnInfo>("connect", { host, path });
 /** Resolve another folder on the connected host; no new ssh session. */
-export const openFolder = (path: string) => invoke<string>("open_folder", { path });
-export const disconnect = () => invoke<void>("disconnect");
-export const listDir = (path: string) => invoke<Entry[]>("list_dir", { path });
-export const readFile = (path: string) => invoke<FileContent>("read_file", { path });
+export const openFolder = (id: number, path: string) => invoke<string>("open_folder", { conn: id, path });
+export const disconnect = (id: number) => invoke<void>("disconnect", { conn: id });
+export const listDir = (path: string) => invoke<Entry[]>("list_dir", { conn, path });
+export const readFile = (path: string) => invoke<FileContent>("read_file", { conn, path });
 /** Raw bytes, for the image and PDF viewers. */
-export const readBytes = (path: string) => invoke<ArrayBuffer>("read_bytes", { path });
+export const readBytes = (path: string) => invoke<ArrayBuffer>("read_bytes", { conn, path });
 
 export interface Stat {
   size: number;
   /** Changes whenever the file's size or modification time does. */
   version: string;
 }
-export const stat = (path: string) => invoke<Stat>("stat", { path });
+export const stat = (path: string) => invoke<Stat>("stat", { conn, path });
 
 export const writeFile = (path: string, text: string, expectedHash: string | null) =>
-  invoke<Written>("write_file", { path, text, expectedHash });
+  invoke<Written>("write_file", { conn, path, text, expectedHash });
 
 export interface LogEvent {
   level: "step" | "warn" | "remote";
@@ -98,20 +105,24 @@ export interface PtyOpened {
 
 /** Start the remote login shell; its output streams to `output`. */
 export const ptyOpen = (
+  conn: number,
   cols: number,
   rows: number,
   cwd: string | null,
   output: Channel<ArrayBuffer>,
-) => invoke<PtyOpened>("pty_open", { cols, rows, cwd, output });
+) => invoke<PtyOpened>("pty_open", { conn, cols, rows, cwd, output });
 /** Keystrokes. Calls reach the shell in the order they are made. */
-export const ptyWrite = (pty: number, data: string) => invoke<void>("pty_write", { pty, data });
+export const ptyWrite = (conn: number, pty: number, data: string) =>
+  invoke<void>("pty_write", { conn, pty, data });
 /** The terminal has drawn `bytes` more output, so the remote may send more. */
-export const ptyAck = (pty: number, bytes: number) => invoke<void>("pty_ack", { pty, bytes });
-export const ptyResize = (pty: number, cols: number, rows: number) =>
-  invoke<void>("pty_resize", { pty, cols, rows });
-export const ptyClose = (pty: number) => invoke<void>("pty_close", { pty });
+export const ptyAck = (conn: number, pty: number, bytes: number) =>
+  invoke<void>("pty_ack", { conn, pty, bytes });
+export const ptyResize = (conn: number, pty: number, cols: number, rows: number) =>
+  invoke<void>("pty_resize", { conn, pty, cols, rows });
+export const ptyClose = (conn: number, pty: number) => invoke<void>("pty_close", { conn, pty });
 
 export interface PtyExitEvent {
+  conn: number;
   pty: number;
   /** null when a signal ended the shell. */
   code: number | null;
@@ -154,17 +165,17 @@ export interface GitDiff {
 
 /** `repo` is null when `dir` is not inside a git repository. */
 export const gitStatus = (dir: string) =>
-  invoke<{ repo: string | null; status: GitStatus | null }>("git_status", { dir });
+  invoke<{ repo: string | null; status: GitStatus | null }>("git_status", { conn, dir });
 export const gitLog = (repo: string, skip: number, limit: number) =>
-  invoke<GitCommit[]>("git_log", { repo, skip, limit });
+  invoke<GitCommit[]>("git_log", { conn, repo, skip, limit });
 export const gitCommitFiles = (repo: string, hash: string) =>
-  invoke<GitChange[]>("git_commit_files", { repo, hash });
+  invoke<GitChange[]>("git_commit_files", { conn, repo, hash });
 /** Without `rev`: HEAD against the working tree. With it: that commit against its parent. */
 export const gitDiff = (repo: string, path: string, oldPath: string | null, rev: string | null) =>
-  invoke<GitDiff>("git_diff", { repo, path, oldPath, rev });
+  invoke<GitDiff>("git_diff", { conn, repo, path, oldPath, rev });
 
 /** Files under `dir` that git does not ignore, relative to it; null outside a repository. */
-export const gitFiles = (dir: string) => invoke<string[] | null>("git_files", { dir });
+export const gitFiles = (dir: string) => invoke<string[] | null>("git_files", { conn, dir });
 
 export interface SearchMatch {
   /** Relative to the searched folder. */
@@ -172,9 +183,18 @@ export interface SearchMatch {
   line: number;
   text: string;
 }
+export interface SearchQuery {
+  pattern: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  word: boolean;
+  /** Globs as in VS Code: `*.py` and `build` match at any depth, `./src` from `dir`. */
+  include: string[];
+  exclude: string[];
+}
 /** Lines matching `query` in the files under `dir` that git does not ignore. */
-export const search = (dir: string, query: string, regex: boolean, caseSensitive: boolean, word: boolean) =>
-  invoke<{ matches: SearchMatch[]; truncated: boolean }>("search", { dir, query, regex, caseSensitive, word });
+export const search = (dir: string, query: SearchQuery) =>
+  invoke<{ matches: SearchMatch[]; truncated: boolean }>("search", { conn, dir, query });
 
 // ---- quitting
 

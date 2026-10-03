@@ -28,6 +28,8 @@ let conn: api.ConnInfo | null = null;
 let target = { host: "", folder: "" };
 /** The open workspace as resolved: host and folder. */
 let wsKey: string | null = null;
+/** Live connections by host; the workspaces on a host share one. */
+const hosts = new Map<string, api.ConnInfo>();
 
 // ---- recent connections (a per-machine convenience; failures are harmless)
 
@@ -117,6 +119,8 @@ void api.onAskpass(async ({ id, prompt }) => {
 let droppedWhileConnecting: string | null = null;
 
 void api.onClosed((e) => {
+  for (const [h, c] of hosts) if (c.generation === e.generation) hosts.delete(h);
+  terminals.disconnected(e.generation);
   if (!conn || e.generation !== conn.generation) return;
   if (connecting) droppedWhileConnecting = e.reason;
   else connectionLost(e.reason);
@@ -124,7 +128,6 @@ void api.onClosed((e) => {
 
 function connectionLost(reason: string) {
   statusConn.classList.add("down");
-  terminals.disconnected();
   scheduleReconnect(reason);
 }
 
@@ -189,6 +192,7 @@ async function reconnectNow() {
   try {
     const oldRoot = conn?.root;
     const info = await api.connect(target.host, target.folder || "~");
+    hosts.set(info.host, info);
     retry.attempt = 0;
     await startSession(info);
     // The folder may resolve differently now (a moved symlink, say).
@@ -263,7 +267,11 @@ const editors = new Editors(
   $("tabs"),
   $("placeholder"),
   (msg) => status(msg),
-  (path) => tree.setActive(path),
+  (path) => {
+    tree.setActive(path);
+    // Runs whenever a tab opens, closes or comes to the front.
+    saveTabs();
+  },
   (pos) => ($("status-pos").textContent = pos),
   () => void git.refreshChanges(),
   pathMenu,
@@ -309,6 +317,7 @@ const terminals = new TerminalPanel(
   $("term-tabs"),
   $("term-body"),
   () => conn?.root ?? null,
+  () => conn?.generation ?? null,
   (path) => void editors.open(path),
 );
 
@@ -331,6 +340,7 @@ window.addEventListener(
 
 async function startSession(info: api.ConnInfo) {
   conn = info;
+  api.useConnection(info.generation);
   stopRetrying();
   retry.attempt = 0;
   git.reset();
@@ -355,41 +365,33 @@ async function startSession(info: api.ConnInfo) {
 
 /**
  * Open `folder` on `host`, putting the current workspace aside: its tabs,
- * unsaved edits and tree come back as they were when it is opened again.
- * Another folder on the same host reuses the connection.
+ * unsaved edits, terminals and tree come back as they were when it is opened
+ * again. Each host's connection stays open, so going back needs no login.
  */
 async function openWorkspace(host: string, folder: string): Promise<boolean> {
   if (connecting) return false;
-  const sameHost = !!conn && conn.host === host && !statusConn.classList.contains("down");
-  if (conn && !sameHost && terminals.hasLive()) {
-    const choice = await ask(`Terminals on ${conn.host} will be closed.`, [
-      { value: "cancel", label: "Cancel", primary: true },
-      { value: "switch", label: "Close them and switch", danger: true },
-    ]);
-    if (choice !== "switch") return false;
-  }
   connecting = true;
   let ok = false;
+  let reopen: SavedTabs | null = null;
   try {
-    let info: api.ConnInfo;
-    if (sameHost) {
-      info = { ...conn!, root: await api.openFolder(folder || "~") };
-    } else {
-      info = await api.connect(host, folder || "~");
-      // The old host's shells ended with its connection.
-      terminals.disconnected();
-      terminals.closeAll();
-    }
+    const live = hosts.get(host);
+    const info: api.ConnInfo = live
+      ? { ...live, root: await api.openFolder(live.generation, folder || "~") }
+      : await api.connect(host, folder || "~");
+    hosts.set(host, info);
     ok = true;
     target = { host, folder };
     saveRecent(target);
     await startSession(info);
     const key = `${info.host}:${info.root}`;
-    if (key !== wsKey) {
-      editors.switchTo(wsKey, key);
-      search.reset();
-      const from = wsKey;
+    const from = wsKey;
+    if (key !== from) {
       wsKey = key;
+      // Read first: switching saves the (still empty) tabs of `key`.
+      const saved = loadTabs()[key] ?? null;
+      if (!editors.switchTo(from, key)) reopen = saved;
+      terminals.switchTo(key);
+      search.reset();
       await tree.switchTo(from, key, info.root);
     }
     void git.refreshChanges();
@@ -416,7 +418,39 @@ async function openWorkspace(host: string, folder: string): Promise<boolean> {
     droppedWhileConnecting = null;
     if (!ok && dropped) connectionLost(dropped);
   }
+  if (reopen) {
+    restoring = true;
+    await editors.reopen(reopen.files, reopen.active).finally(() => (restoring = false));
+    saveTabs();
+  }
   return ok;
+}
+
+// ---- each workspace's open files, kept for the next session
+
+interface SavedTabs {
+  files: string[];
+  active: string | null;
+}
+const TABS_KEY = "yonder.tabs";
+/** Set while saved tabs reopen, so the half-open list is not saved over them. */
+let restoring = false;
+
+function loadTabs(): Record<string, SavedTabs> {
+  try {
+    return JSON.parse(localStorage.getItem(TABS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveTabs() {
+  if (!wsKey || restoring) return;
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify({ ...loadTabs(), [wsKey]: editors.openFiles() }));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 /** Switch Workspace (⌥⌘O): pick a recent folder. */

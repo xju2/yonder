@@ -4,7 +4,7 @@
 //! machine-readable output. Nothing here writes to the repository.
 
 use crate::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use yonder_proto::{Error, ErrorKind, Op, Reply};
 
 /// Output larger than this is cut off; enough for any listing we show.
@@ -318,16 +318,25 @@ pub struct Found {
     pub truncated: bool,
 }
 
-/// Lines matching `pattern` in the text files under `dir` that git does not
+/// What to search for, and how.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Query {
+    pub pattern: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub word: bool,
+    /// File globs to search in and to skip, as in VS Code: `*.py` or `build`
+    /// match at any depth, `src/*.rs` or `./src` from the searched folder.
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+
+/// Lines matching `q` in the text files under `dir` that git does not
 /// ignore. Works outside repositories too (`--no-index`).
-pub async fn search(
-    conn: &Connection,
-    dir: &str,
-    pattern: &str,
-    regex: bool,
-    case_sensitive: bool,
-    word: bool,
-) -> Result<Found, Error> {
+pub async fn search(conn: &Connection, dir: &str, q: &Query) -> Result<Found, Error> {
+    let (pattern, regex, case_sensitive, word) =
+        (q.pattern.as_str(), q.regex, q.case_sensitive, q.word);
     let mut args = vec!["grep", "--no-index", "--exclude-standard", "-n", "-z", "-I"];
     args.push(if regex { "-E" } else { "-F" });
     if !case_sensitive {
@@ -336,7 +345,9 @@ pub async fn search(
     if word {
         args.push("-w");
     }
-    args.extend(["-e", pattern]);
+    args.extend(["-e", pattern, "--"]);
+    let specs = pathspecs(&q.include, &q.exclude);
+    args.extend(specs.iter().map(String::as_str));
     let out = git(conn, dir, &args, MAX_SEARCH).await?;
     // 1: nothing matched. A cut-off run was stopped, so it has no code.
     if !out.truncated && !matches!(out.code, Some(0 | 1)) {
@@ -345,6 +356,32 @@ pub async fn search(
     let mut found = parse_grep(&out.stdout);
     found.truncated |= out.truncated;
     Ok(found)
+}
+
+/// Git pathspecs for include and exclude globs. Each glob also matches
+/// everything inside a folder of that name.
+pub fn pathspecs(include: &[String], exclude: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (globs, magic) in [(include, "glob"), (exclude, "exclude,glob")] {
+        for g in globs {
+            let g = g.trim();
+            // `./src` is the searched folder's own `src`.
+            let rooted = g.starts_with("./") || g.starts_with('/');
+            let g = g.trim_start_matches("./").trim_start_matches('/');
+            let g = g.trim_end_matches('/');
+            if g.is_empty() {
+                continue;
+            }
+            let g = if rooted || g.contains('/') || g.starts_with("**") {
+                g.to_string()
+            } else {
+                format!("**/{g}")
+            };
+            out.push(format!(":({magic}){g}"));
+            out.push(format!(":({magic}){g}/**"));
+        }
+    }
+    out
 }
 
 /// Parse `git grep -n -z`: `path\0line\0text\n` per match.
@@ -504,6 +541,22 @@ bbbb\x1fbb\x1fBo\x1f1690000000\x1fp1 p2\x1fMerge branch 'x'\x1e\n";
         assert!(!log[0].merge);
         assert!(log[1].merge);
         assert_eq!(log[1].author, "Bo");
+    }
+
+    #[test]
+    fn search_globs() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            pathspecs(&v(&["*.py", " ./src/ ", ""]), &v(&["build"])),
+            v(&[
+                ":(glob)**/*.py",
+                ":(glob)**/*.py/**",
+                ":(glob)src",
+                ":(glob)src/**",
+                ":(exclude,glob)**/build",
+                ":(exclude,glob)**/build/**",
+            ])
+        );
     }
 
     #[test]

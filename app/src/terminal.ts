@@ -29,6 +29,10 @@ const ACK_BATCH = 64 * 1024;
 
 interface Term {
   term: Terminal;
+  /** The connection its shell runs on. */
+  conn: number;
+  /** The workspace it belongs to; other workspaces' terminals are hidden. */
+  ws: string;
   fit: FitAddon;
   /** null until the shell has started. */
   pty: number | null;
@@ -43,9 +47,14 @@ interface Term {
 }
 
 export class TerminalPanel {
+  /** Every workspace's terminals. */
   private terms: Term[] = [];
   private active: Term | null = null;
-  private byPty = new Map<number, Term>();
+  /** By connection and terminal id: each connection numbers its own. */
+  private byPty = new Map<string, Term>();
+  private ws = "";
+  /** The terminal each other workspace had showing. */
+  private lastActive = new Map<string, Term>();
   private count = 0;
 
   constructor(
@@ -55,10 +64,12 @@ export class TerminalPanel {
     private body: HTMLElement,
     /** Where new shells start: the open folder. */
     private cwd: () => string | null,
+    /** The connection new shells run on. */
+    private conn: () => number | null,
     /** `yonder FILE` was run in a terminal. */
     private onOpen: (path: string) => void,
   ) {
-    void api.onPtyExit((e) => this.exited(e.pty, e.code));
+    void api.onPtyExit((e) => this.exited(e.conn, e.pty, e.code));
     dark.addEventListener("change", () => {
       for (const t of this.terms) t.term.options.theme = dark.matches ? DARK : LIGHT;
     });
@@ -74,10 +85,30 @@ export class TerminalPanel {
     else this.show();
   }
 
+  /** This workspace's terminals. */
+  private mine() {
+    return this.terms.filter((t) => t.ws === this.ws);
+  }
+
+  /** Show workspace `key`'s terminals; the others keep running, hidden. */
+  switchTo(key: string) {
+    if (this.active) this.lastActive.set(this.ws, this.active);
+    this.ws = key;
+    this.active = null;
+    for (const t of this.terms) {
+      t.tab.hidden = t.ws !== key;
+      t.view.hidden = true;
+    }
+    const next = this.lastActive.get(key) ?? this.mine()[0];
+    this.lastActive.delete(key);
+    if (next && !next.closed) this.select(next, false);
+    else this.hide();
+  }
+
   show() {
     this.panel.hidden = false;
     this.sash.hidden = false;
-    if (this.terms.length === 0) void this.create();
+    if (this.mine().length === 0) void this.create();
     else {
       this.fitActive();
       this.active?.term.focus();
@@ -90,6 +121,8 @@ export class TerminalPanel {
   }
 
   async create() {
+    const conn = this.conn();
+    if (conn === null) return;
     this.panel.hidden = false;
     this.sash.hidden = false;
     const term = new Terminal({
@@ -105,7 +138,8 @@ export class TerminalPanel {
     term.loadAddon(fit);
     // `yonder FILE` in the shell prints ESC ] 7777 ; open ; PATH BEL.
     term.parser.registerOscHandler(7777, (data) => {
-      if (data.startsWith("open;/")) this.onOpen(data.slice("open;".length));
+      // Only from the workspace showing: a hidden one may be on another host.
+      if (data.startsWith("open;/") && t.ws === this.ws) this.onOpen(data.slice("open;".length));
       return true;
     });
     // Let the show/hide shortcut through instead of sending it to the shell.
@@ -116,6 +150,8 @@ export class TerminalPanel {
     this.body.append(view);
     const t: Term = {
       term,
+      conn,
+      ws: this.ws,
       fit,
       pty: null,
       alive: false,
@@ -140,7 +176,7 @@ export class TerminalPanel {
     const rows = term.rows;
     let opened: api.PtyOpened;
     try {
-      opened = await api.ptyOpen(cols, rows, this.cwd(), output);
+      opened = await api.ptyOpen(conn, cols, rows, this.cwd(), output);
     } catch (e) {
       if (t.closed) return;
       const msg = api.asError(e).message;
@@ -152,7 +188,7 @@ export class TerminalPanel {
     if (t.closed) {
       // Closed while the shell was starting: hang it up rather than leave
       // it running on the remote.
-      if (!opened.exited) api.ptyClose(opened.pty).catch(() => {});
+      if (!opened.exited) api.ptyClose(conn, opened.pty).catch(() => {});
       return;
     }
     if (opened.exited) {
@@ -160,28 +196,29 @@ export class TerminalPanel {
       return;
     }
     t.alive = true;
-    this.byPty.set(opened.pty, t);
+    this.byPty.set(`${conn}:${opened.pty}`, t);
     this.flushAck(t);
     term.onData((data) => {
-      if (t.alive && t.pty !== null) api.ptyWrite(t.pty, data).catch(() => this.markDead(t));
+      if (t.alive && t.pty !== null) api.ptyWrite(conn, t.pty, data).catch(() => this.markDead(t));
     });
     term.onResize(({ cols, rows }) => {
-      if (t.alive && t.pty !== null) api.ptyResize(t.pty, cols, rows).catch(() => {});
+      if (t.alive && t.pty !== null) api.ptyResize(conn, t.pty, cols, rows).catch(() => {});
     });
     // The panel may have been resized while the shell started.
     if (term.cols !== cols || term.rows !== rows) {
-      api.ptyResize(t.pty!, term.cols, term.rows).catch(() => {});
+      api.ptyResize(conn, t.pty!, term.cols, term.rows).catch(() => {});
     }
     if (this.active === t) term.focus();
   }
 
-  /** The connection is gone: running shells ended with it. */
-  disconnected() {
-    for (const t of this.byPty.values()) {
+  /** Connection `conn` is gone: its running shells ended with it. */
+  disconnected(conn: number) {
+    for (const [key, t] of this.byPty) {
+      if (t.conn !== conn) continue;
       t.term.write("\r\n\x1b[2m[connection lost; open a new terminal after reconnecting]\x1b[0m\r\n");
       this.markDead(t);
+      this.byPty.delete(key);
     }
-    this.byPty.clear();
   }
 
   private buildTab(): HTMLElement {
@@ -208,16 +245,6 @@ export class TerminalPanel {
     return tab;
   }
 
-  /** Some shell is still running. */
-  hasLive(): boolean {
-    return this.byPty.size > 0;
-  }
-
-  /** Close every terminal; call disconnected() first, their shells are gone. */
-  closeAll() {
-    for (const t of [...this.terms]) this.close(t);
-  }
-
   /** Close the active terminal if it has the keyboard; false otherwise. */
   closeFocused(): boolean {
     if (!this.active || !this.panel.contains(document.activeElement)) return false;
@@ -225,27 +252,29 @@ export class TerminalPanel {
     return true;
   }
 
-  private select(t: Term) {
+  private select(t: Term, focus = true) {
     this.active = t;
     for (const x of this.terms) {
       x.view.hidden = x !== t;
       x.tab.classList.toggle("active", x === t);
     }
     this.fitActive();
-    t.term.focus();
+    if (focus) t.term.focus();
   }
 
   private close(t: Term) {
     t.closed = true;
     clearTimeout(t.ackTimer);
-    if (t.alive && t.pty !== null) api.ptyClose(t.pty).catch(() => {});
-    if (t.pty !== null) this.byPty.delete(t.pty);
-    const i = this.terms.indexOf(t);
-    this.terms.splice(i, 1);
+    if (t.alive && t.pty !== null) api.ptyClose(t.conn, t.pty).catch(() => {});
+    if (t.pty !== null) this.byPty.delete(`${t.conn}:${t.pty}`);
+    const mine = this.mine();
+    const i = mine.indexOf(t);
+    this.terms.splice(this.terms.indexOf(t), 1);
+    mine.splice(i, 1);
     t.term.dispose();
     t.view.remove();
     t.tab.remove();
-    const next = this.terms[Math.min(i, this.terms.length - 1)];
+    const next = mine[Math.min(i, mine.length - 1)];
     if (next) this.select(next);
     else {
       this.active = null;
@@ -253,10 +282,10 @@ export class TerminalPanel {
     }
   }
 
-  private exited(pty: number, code: number | null) {
-    const t = this.byPty.get(pty);
+  private exited(conn: number, pty: number, code: number | null) {
+    const t = this.byPty.get(`${conn}:${pty}`);
     if (!t) return;
-    this.byPty.delete(pty);
+    this.byPty.delete(`${conn}:${pty}`);
     this.showExit(t, code);
   }
 
@@ -277,7 +306,7 @@ export class TerminalPanel {
     t.ackTimer = 0;
     // Output that arrived before the id was known is acknowledged later.
     if (!t.alive || t.pty === null || t.unacked === 0) return;
-    api.ptyAck(t.pty, t.unacked).catch(() => {});
+    api.ptyAck(t.conn, t.pty, t.unacked).catch(() => {});
     t.unacked = 0;
   }
 

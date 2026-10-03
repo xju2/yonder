@@ -26,11 +26,12 @@ const MAX_VIEW_BYTES: u64 = 128 << 20;
 
 #[derive(Default)]
 struct AppState {
-    conn: Mutex<Option<Arc<Connection>>>,
-    /// Identifies a connection, so the UI can ignore a late "closed" event
-    /// from one it already replaced.
+    /// Open connections by id, one per host the UI has workspaces on.
+    conns: Mutex<HashMap<u64, Arc<Connection>>>,
+    /// The last connection id handed out; ids are never reused.
     generation: AtomicU64,
-    terminals: Arc<Mutex<Terminals>>,
+    /// Terminals of each connection, by connection id.
+    terminals: Arc<Mutex<HashMap<u64, Terminals>>>,
     /// Held for a whole connection attempt, so password prompts and their
     /// cancellation belong to one attempt at a time.
     connecting: tokio::sync::Mutex<()>,
@@ -47,8 +48,6 @@ struct AppState {
 /// has returned the terminal's id to the UI, so it is held until then.
 #[derive(Default)]
 struct Terminals {
-    /// The connection these terminals belong to; ids restart with each agent.
-    generation: u64,
     channels: HashMap<u64, Channel<InvokeResponseBody>>,
     early_output: HashMap<u64, Vec<Vec<u8>>>,
     early_exit: HashMap<u64, Option<i32>>,
@@ -56,6 +55,7 @@ struct Terminals {
 
 #[derive(Serialize, Clone)]
 struct PtyExitEvent {
+    conn: u64,
     pty: u64,
     code: Option<i32>,
 }
@@ -64,7 +64,7 @@ struct PtyExitEvent {
 fn forward_events(
     app: AppHandle,
     conn: &Connection,
-    terminals: Arc<Mutex<Terminals>>,
+    terminals: Arc<Mutex<HashMap<u64, Terminals>>>,
     generation: u64,
 ) {
     let Some(mut events) = conn.take_events() else {
@@ -72,10 +72,10 @@ fn forward_events(
     };
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
-            let mut t = terminals.lock().unwrap();
-            if t.generation != generation {
+            let mut all = terminals.lock().unwrap();
+            let Some(t) = all.get_mut(&generation) else {
                 return;
-            }
+            };
             match event {
                 Event::PtyOutput { pty, data } => match t.channels.get(&pty) {
                     Some(ch) => {
@@ -85,7 +85,14 @@ fn forward_events(
                 },
                 Event::PtyExit { pty, code } => {
                     if t.channels.remove(&pty).is_some() {
-                        let _ = app.emit("pty-exit", PtyExitEvent { pty, code });
+                        let _ = app.emit(
+                            "pty-exit",
+                            PtyExitEvent {
+                                conn: generation,
+                                pty,
+                                code,
+                            },
+                        );
                     } else {
                         t.early_exit.insert(pty, code);
                     }
@@ -96,12 +103,17 @@ fn forward_events(
 }
 
 impl AppState {
-    fn current(&self) -> Result<Arc<Connection>, CmdError> {
-        self.conn.lock().unwrap().clone().ok_or_else(|| CmdError {
-            kind: "disconnected",
-            message: "not connected to the remote".into(),
-            hint: None,
-        })
+    fn get(&self, conn: u64) -> Result<Arc<Connection>, CmdError> {
+        self.conns
+            .lock()
+            .unwrap()
+            .get(&conn)
+            .cloned()
+            .ok_or_else(|| CmdError {
+                kind: "disconnected",
+                message: "not connected to the remote".into(),
+                hint: None,
+            })
     }
 }
 
@@ -234,20 +246,24 @@ async fn connect(
         hostname: conn.info().hostname.clone(),
         home: conn.info().home.clone(),
     };
-    // The old connection stays up until this one works, so a failed switch
-    // to another host leaves the current one as it was.
-    if let Some(old) = state.conn.lock().unwrap().replace(Arc::clone(&conn)) {
-        old.close();
-    }
-    *state.terminals.lock().unwrap() = Terminals {
-        generation,
-        ..Default::default()
-    };
+    state
+        .conns
+        .lock()
+        .unwrap()
+        .insert(generation, Arc::clone(&conn));
+    state
+        .terminals
+        .lock()
+        .unwrap()
+        .insert(generation, Terminals::default());
     forward_events(app.clone(), &conn, Arc::clone(&state.terminals), generation);
 
     let watcher = Arc::clone(&conn);
     tauri::async_runtime::spawn(async move {
         let reason = watcher.closed().await;
+        let state = app.state::<AppState>();
+        state.conns.lock().unwrap().remove(&generation);
+        state.terminals.lock().unwrap().remove(&generation);
         let _ = app.emit("conn-closed", ClosedEvent { generation, reason });
     });
     Ok(info)
@@ -267,14 +283,18 @@ async fn resolve_folder(conn: &Connection, path: String) -> Result<String, CmdEr
 
 /// Another folder on the connected host: no new ssh session.
 #[tauri::command]
-async fn open_folder(state: State<'_, AppState>, path: String) -> Result<String, CmdError> {
-    let conn = state.current()?;
+async fn open_folder(
+    state: State<'_, AppState>,
+    conn: u64,
+    path: String,
+) -> Result<String, CmdError> {
+    let conn = state.get(conn)?;
     resolve_folder(&conn, path).await
 }
 
 #[tauri::command]
-fn disconnect(state: State<'_, AppState>) {
-    if let Some(conn) = state.conn.lock().unwrap().take() {
+fn disconnect(state: State<'_, AppState>, conn: u64) {
+    if let Some(conn) = state.conns.lock().unwrap().remove(&conn) {
         conn.close();
     }
 }
@@ -288,8 +308,12 @@ struct EntryOut {
 }
 
 #[tauri::command]
-async fn list_dir(state: State<'_, AppState>, path: String) -> Result<Vec<EntryOut>, CmdError> {
-    match state.current()?.call(Op::ListDir { path }).await? {
+async fn list_dir(
+    state: State<'_, AppState>,
+    conn: u64,
+    path: String,
+) -> Result<Vec<EntryOut>, CmdError> {
+    match state.get(conn)?.call(Op::ListDir { path }).await? {
         Reply::Entries(entries) => Ok(entries
             .into_iter()
             .map(|e| EntryOut {
@@ -318,12 +342,16 @@ struct FileOut {
 }
 
 #[tauri::command]
-async fn read_file(state: State<'_, AppState>, path: String) -> Result<FileOut, CmdError> {
+async fn read_file(
+    state: State<'_, AppState>,
+    conn: u64,
+    path: String,
+) -> Result<FileOut, CmdError> {
     let op = Op::ReadFile {
         path,
         max_bytes: MAX_OPEN_BYTES,
     };
-    match state.current()?.call(op).await? {
+    match state.get(conn)?.call(op).await? {
         Reply::File { data, hash, stat } => {
             let sniff = &data[..data.len().min(8192)];
             let text = if sniff.contains(&0) {
@@ -344,12 +372,16 @@ async fn read_file(state: State<'_, AppState>, path: String) -> Result<FileOut, 
 /// The raw bytes of a file, for the image and PDF viewers. Sent as binary,
 /// not JSON, so a 20 MB PDF does not become an 80 MB array of numbers.
 #[tauri::command]
-async fn read_bytes(state: State<'_, AppState>, path: String) -> Result<Response, CmdError> {
+async fn read_bytes(
+    state: State<'_, AppState>,
+    conn: u64,
+    path: String,
+) -> Result<Response, CmdError> {
     let op = Op::ReadFile {
         path,
         max_bytes: MAX_VIEW_BYTES,
     };
-    match state.current()?.call(op).await? {
+    match state.get(conn)?.call(op).await? {
         Reply::File { data, .. } => Ok(Response::new(data)),
         other => Err(unexpected(other)),
     }
@@ -363,8 +395,8 @@ struct StatOut {
 }
 
 #[tauri::command]
-async fn stat(state: State<'_, AppState>, path: String) -> Result<StatOut, CmdError> {
-    match state.current()?.call(Op::Stat { path }).await? {
+async fn stat(state: State<'_, AppState>, conn: u64, path: String) -> Result<StatOut, CmdError> {
+    match state.get(conn)?.call(Op::Stat { path }).await? {
         Reply::Stat(s) => Ok(StatOut {
             size: s.size,
             version: format!("{}:{}.{:09}", s.size, s.mtime_s, s.mtime_ns),
@@ -387,20 +419,28 @@ struct PtyOpened {
 #[tauri::command]
 async fn pty_open(
     state: State<'_, AppState>,
+    conn: u64,
     cols: u16,
     rows: u16,
     cwd: Option<String>,
     output: Channel<InvokeResponseBody>,
 ) -> Result<PtyOpened, CmdError> {
     let pty = match state
-        .current()?
+        .get(conn)?
         .call(Op::PtyOpen { cols, rows, cwd })
         .await?
     {
         Reply::Pty { pty } => pty,
         other => return Err(unexpected(other)),
     };
-    let mut t = state.terminals.lock().unwrap();
+    let mut all = state.terminals.lock().unwrap();
+    let Some(t) = all.get_mut(&conn) else {
+        return Err(CmdError {
+            kind: "disconnected",
+            message: "not connected to the remote".into(),
+            hint: None,
+        });
+    };
     for data in t.early_output.remove(&pty).unwrap_or_default() {
         let _ = output.send(InvokeResponseBody::Raw(data));
     }
@@ -418,40 +458,47 @@ async fn pty_open(
 /// Keystrokes. Not async, so calls run one after another in the order the UI
 /// made them, and nothing waits for the remote to answer.
 #[tauri::command]
-fn pty_write(state: State<'_, AppState>, pty: u64, data: String) -> Result<(), CmdError> {
+fn pty_write(
+    state: State<'_, AppState>,
+    conn: u64,
+    pty: u64,
+    data: String,
+) -> Result<(), CmdError> {
     let data = data.into_bytes();
-    Ok(state.current()?.send(Op::PtyInput { pty, data })?)
+    Ok(state.get(conn)?.send(Op::PtyInput { pty, data })?)
 }
 
 /// The UI has drawn `bytes` more output; lets the agent send more.
 #[tauri::command]
-fn pty_ack(state: State<'_, AppState>, pty: u64, bytes: u64) -> Result<(), CmdError> {
-    Ok(state.current()?.send(Op::PtyAck { pty, bytes })?)
+fn pty_ack(state: State<'_, AppState>, conn: u64, pty: u64, bytes: u64) -> Result<(), CmdError> {
+    Ok(state.get(conn)?.send(Op::PtyAck { pty, bytes })?)
 }
 
 #[tauri::command]
 async fn pty_resize(
     state: State<'_, AppState>,
+    conn: u64,
     pty: u64,
     cols: u16,
     rows: u16,
 ) -> Result<(), CmdError> {
     state
-        .current()?
+        .get(conn)?
         .call(Op::PtyResize { pty, cols, rows })
         .await?;
     Ok(())
 }
 
 #[tauri::command]
-async fn pty_close(state: State<'_, AppState>, pty: u64) -> Result<(), CmdError> {
+async fn pty_close(state: State<'_, AppState>, conn: u64, pty: u64) -> Result<(), CmdError> {
     {
-        let mut t = state.terminals.lock().unwrap();
-        t.channels.remove(&pty);
-        t.early_output.remove(&pty);
-        t.early_exit.remove(&pty);
+        if let Some(t) = state.terminals.lock().unwrap().get_mut(&conn) {
+            t.channels.remove(&pty);
+            t.early_output.remove(&pty);
+            t.early_exit.remove(&pty);
+        }
     }
-    state.current()?.call(Op::PtyClose { pty }).await?;
+    state.get(conn)?.call(Op::PtyClose { pty }).await?;
     Ok(())
 }
 
@@ -465,8 +512,12 @@ struct GitStatusOut {
 }
 
 #[tauri::command]
-async fn git_status(state: State<'_, AppState>, dir: String) -> Result<GitStatusOut, CmdError> {
-    let conn = state.current()?;
+async fn git_status(
+    state: State<'_, AppState>,
+    conn: u64,
+    dir: String,
+) -> Result<GitStatusOut, CmdError> {
+    let conn = state.get(conn)?;
     let Some(repo) = git::repo_root(&conn, &dir).await? else {
         return Ok(GitStatusOut {
             repo: None,
@@ -483,21 +534,23 @@ async fn git_status(state: State<'_, AppState>, dir: String) -> Result<GitStatus
 #[tauri::command]
 async fn git_log(
     state: State<'_, AppState>,
+    conn: u64,
     repo: String,
     skip: u32,
     limit: u32,
 ) -> Result<Vec<Commit>, CmdError> {
-    let conn = state.current()?;
+    let conn = state.get(conn)?;
     Ok(git::log(&conn, &repo, skip, limit).await?)
 }
 
 #[tauri::command]
 async fn git_commit_files(
     state: State<'_, AppState>,
+    conn: u64,
     repo: String,
     hash: String,
 ) -> Result<Vec<Change>, CmdError> {
-    let conn = state.current()?;
+    let conn = state.get(conn)?;
     Ok(git::commit_files(&conn, &repo, &hash).await?)
 }
 
@@ -506,9 +559,10 @@ async fn git_commit_files(
 #[tauri::command]
 async fn git_files(
     state: State<'_, AppState>,
+    conn: u64,
     dir: String,
 ) -> Result<Option<Vec<String>>, CmdError> {
-    let conn = state.current()?;
+    let conn = state.get(conn)?;
     Ok(git::files(&conn, &dir).await?)
 }
 
@@ -516,14 +570,12 @@ async fn git_files(
 #[tauri::command]
 async fn search(
     state: State<'_, AppState>,
+    conn: u64,
     dir: String,
-    query: String,
-    regex: bool,
-    case_sensitive: bool,
-    word: bool,
+    query: git::Query,
 ) -> Result<Found, CmdError> {
-    let conn = state.current()?;
-    Ok(git::search(&conn, &dir, &query, regex, case_sensitive, word).await?)
+    let conn = state.get(conn)?;
+    Ok(git::search(&conn, &dir, &query).await?)
 }
 
 #[derive(Serialize)]
@@ -538,12 +590,13 @@ struct DiffOut {
 #[tauri::command]
 async fn git_diff(
     state: State<'_, AppState>,
+    conn: u64,
     repo: String,
     path: String,
     old_path: Option<String>,
     rev: Option<String>,
 ) -> Result<DiffOut, CmdError> {
-    let conn = state.current()?;
+    let conn = state.get(conn)?;
     let before = old_path.as_deref().unwrap_or(&path);
     let (original, modified) = match &rev {
         Some(rev) => {
@@ -607,6 +660,7 @@ struct WrittenOut {
 #[tauri::command]
 async fn write_file(
     state: State<'_, AppState>,
+    conn: u64,
     path: String,
     text: String,
     expected_hash: Option<String>,
@@ -624,7 +678,7 @@ async fn write_file(
         data: text.into_bytes(),
         expected_hash,
     };
-    match state.current()?.call(op).await? {
+    match state.get(conn)?.call(op).await? {
         Reply::Written { hash, stat } => Ok(WrittenOut {
             hash: format!("{hash:016x}"),
             size: stat.size,
@@ -689,7 +743,7 @@ fn askpass_answer(state: State<'_, AppState>, id: u64, answer: Option<String>) {
 /// them.
 #[tauri::command]
 fn quit_app(app: AppHandle, state: State<'_, AppState>) {
-    if let Some(conn) = state.conn.lock().unwrap().take() {
+    for (_, conn) in state.conns.lock().unwrap().drain() {
         conn.close();
     }
     app.exit(0);

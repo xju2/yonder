@@ -42,6 +42,8 @@ export function spans(text: string, re: RegExp | null): [number, number][] {
 
 export class SearchPanel {
   private input: HTMLInputElement;
+  private include: HTMLInputElement;
+  private exclude: HTMLInputElement;
   private toggles: Record<"caseSensitive" | "word" | "regex", HTMLButtonElement>;
   private summary: HTMLElement;
   private results: HTMLElement;
@@ -79,12 +81,38 @@ export class SearchPanel {
       word: toggle("ab", "Match whole word"),
       regex: toggle(".*", "Use regular expression"),
     };
+    const more = el("button", "search-toggle", "⋯");
+    more.title = "Files to include and exclude";
+    more.setAttribute("aria-label", more.title);
+    more.setAttribute("aria-expanded", "false");
     const box = el("div", "search-box");
-    box.append(this.input, ...Object.values(this.toggles));
+    box.append(this.input, ...Object.values(this.toggles), more);
+    const field = (label: string, placeholder: string) => {
+      const input = el("input");
+      input.placeholder = placeholder;
+      input.setAttribute("aria-label", label);
+      input.title = `${label}: comma-separated globs. *.py and build match at any depth; ./src is this folder's src.`;
+      input.spellcheck = false;
+      input.autocomplete = "off";
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") void this.search();
+      });
+      return input;
+    };
+    this.include = field("Files to include", "files to include, e.g. *.py, ./src");
+    this.exclude = field("Files to exclude", "files to exclude, e.g. build, *.min.js");
+    const globs = el("div", "search-globs");
+    globs.hidden = true;
+    globs.append(this.include, this.exclude);
+    more.addEventListener("click", () => {
+      globs.hidden = !globs.hidden;
+      more.setAttribute("aria-expanded", String(!globs.hidden));
+      if (!globs.hidden) this.include.focus();
+    });
     this.summary = el("p", "git-note");
     this.summary.setAttribute("role", "status");
     this.results = el("div", "git-body");
-    view.append(box, this.summary, this.results);
+    view.append(box, globs, this.summary, this.results);
   }
 
   /** Put the keyboard in the search box, starting with `text` if given. */
@@ -116,7 +144,15 @@ export class SearchPanel {
     this.summary.textContent = "Searching…";
     let found;
     try {
-      found = await api.search(dir, query, regex, caseSensitive, word);
+      const list = (i: HTMLInputElement) => i.value.split(",").filter((g) => g.trim());
+      found = await api.search(dir, {
+        pattern: query,
+        regex,
+        caseSensitive,
+        word,
+        include: list(this.include),
+        exclude: list(this.exclude),
+      });
     } catch (e) {
       if (run !== this.run) return;
       this.summary.textContent = api.asError(e).message;

@@ -180,19 +180,42 @@ export class Editors {
     return all.some((t) => this.isDirty(t));
   }
 
-  /** Put away this workspace's tabs and bring back those of workspace `key`. */
-  switchTo(from: string | null, key: string) {
+  /**
+   * Put away this workspace's tabs and bring back those of workspace `key`.
+   * False if it had none put away: it was not open in this session.
+   */
+  switchTo(from: string | null, key: string): boolean {
     this.generation++;
     if (this.active?.model) this.active.view = this.editor.saveViewState();
     if (from) this.kept.set(from, { tabs: this.tabs, active: this.active });
     for (const t of this.tabs) t.el.remove();
-    const next = this.kept.get(key) ?? { tabs: [], active: null };
+    const kept = this.kept.get(key);
+    const next = kept ?? { tabs: [], active: null };
     this.kept.delete(key);
     this.tabs = next.tabs;
     for (const t of this.tabs) this.tabsEl.append(t.el);
     // Its view state is saved above; show() must not save it again.
     this.active = null;
     this.show(next.active);
+    return !!kept;
+  }
+
+  /** The open files, for reopening them next time; diffs are left out. */
+  openFiles(): { files: string[]; active: string | null } {
+    const files = this.tabs.map((t) => t.path).filter((p) => !p.startsWith("diff:"));
+    const active = this.active && files.includes(this.active.path) ? this.active.path : null;
+    return { files, active };
+  }
+
+  /** Reopen files from an earlier session; ones that are gone are skipped. */
+  async reopen(files: string[], active: string | null) {
+    const gen = this.generation;
+    for (const f of files) {
+      if (gen !== this.generation) return;
+      await this.openTab(f, true);
+    }
+    const tab = this.tabs.find((t) => t.path === active);
+    if (tab && gen === this.generation) this.show(tab);
   }
 
   /** The selected text, if it is on one line: a search to start with. */
@@ -213,11 +236,12 @@ export class Editors {
     this.editor.focus();
   }
 
-  private async openTab(path: string) {
+  /** `quiet`: a file that cannot be opened is skipped without a word. */
+  private async openTab(path: string, quiet = false) {
     const existing = this.tabs.find((t) => t.path === path);
     if (existing) return this.show(existing);
     const kind = viewKindFor(path);
-    if (kind) return this.openViewer(path, kind);
+    if (kind) return this.openViewer(path, kind, quiet);
     this.status(`Opening ${baseName(path)}…`);
     const gen = this.generation;
     let file;
@@ -226,6 +250,7 @@ export class Editors {
     } catch (e) {
       const err = asError(e);
       this.status("");
+      if (quiet) return;
       if (err.kind === "too_large") {
         await tell(`${baseName(path)} is too large to open in the editor.`, err.message);
       } else {
@@ -267,7 +292,7 @@ export class Editors {
     this.show(tab);
   }
 
-  private async openViewer(path: string, kind: ViewKind) {
+  private async openViewer(path: string, kind: ViewKind, quiet: boolean) {
     const name = baseName(path);
     this.status(`Opening ${name}…`);
     const gen = this.generation;
@@ -280,7 +305,7 @@ export class Editors {
       const err = asError(e);
       this.status("");
       const what = err.kind === "too_large" ? `${name} is too large to view.` : `Could not open ${name}.`;
-      await tell(what, err.message);
+      if (!quiet) await tell(what, err.message);
       return;
     }
     if (gen !== this.generation) return;

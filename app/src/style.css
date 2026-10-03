@@ -197,9 +197,10 @@ button:disabled { opacity: 0.6; cursor: default; }
 /* ---- search view */
 
 .search-box { display: flex; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
-.search-box input {
-  flex: 1;
-  min-width: 0;
+.search-box input { flex: 1; min-width: 0; }
+.search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search-globs { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
+.search-box input, .search-globs input {
   padding: 3px 6px;
   font: 12px var(--mono);
   border: 1px solid var(--border);
@@ -207,7 +208,8 @@ button:disabled { opacity: 0.6; cursor: default; }
   background: var(--bg);
   color: var(--fg);
 }
-.search-box input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search-globs input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search-toggle[aria-expanded="true"] { color: var(--fg); }
 .search-toggle { padding: 0 5px; border: none; background: none; font: 11px var(--mono); color: var(--fg-dim); }
 .search-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
 .search-file .twisty { width: 10px; flex: none; color: var(--fg-dim); }
