@@ -327,9 +327,9 @@ button:disabled { opacity: 0.6; cursor: default; }
   min-height: 0;
   position: relative;
   display: flex;
-  flex-direction: column;
 }
-#editor { flex: 1; min-height: 0; }
+#editor { flex: 1; min-width: 0; }
+#editor-side { flex: 1; min-width: 0; border-left: 1px solid var(--border); }
 
 /* ---- image and PDF viewers */
 

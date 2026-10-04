@@ -338,6 +338,7 @@ void api.onMenu((id) => {
   }
   else if (id === "toggle-sidebar") toggleSidebar();
   else if (id === "markdown-preview") editors.togglePreview();
+  else if (id === "split-editor") editors.toggleSplit();
   else if (id === "copy-path") void copyPath(tree.chosen(), false);
   else if (id === "copy-relative-path") void copyPath(tree.chosen(), true);
   // Cmd+W closes the terminal that has the keyboard, else the editor tab.

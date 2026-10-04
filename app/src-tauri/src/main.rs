@@ -1143,6 +1143,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+Shift+V")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("split-editor", "Split Editor")
+                .accelerator("CmdOrCtrl+Backslash")
+                .build(app)?,
+        )
         .build()?;
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
@@ -1203,7 +1208,7 @@ fn main() {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "quit" if request_quit(app) => app.exit(0),
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
-            | "toggle-sidebar" | "markdown-preview" | "switch-workspace"
+            | "toggle-sidebar" | "markdown-preview" | "split-editor" | "switch-workspace"
             | "new-workspace" | "find-in-folder" | "install-cli") => {
                 let _ = app.emit("menu", id);
             }

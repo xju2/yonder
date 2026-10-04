@@ -131,6 +131,15 @@ interface Tab {
   preview: HTMLIFrameElement | null;
 }
 
+const TEXT_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
+  automaticLayout: true,
+  fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
+  fontSize: 13,
+  minimap: { enabled: false },
+  scrollBeyondLastLine: false,
+  renderWhitespace: "selection",
+};
+
 export class Editors {
   private tabs: Tab[] = [];
   private active: Tab | null = null;
@@ -141,6 +150,8 @@ export class Editors {
   private editor: monaco.editor.IStandaloneCodeEditor;
 
   private diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
+  /** A second editor beside the first, on one text tab's model. */
+  private side: { editor: monaco.editor.IStandaloneCodeEditor; el: HTMLElement; tab: Tab } | null = null;
 
   constructor(
     private host: HTMLElement,
@@ -158,15 +169,7 @@ export class Editors {
     /** The Jupyter page for a notebook; it may take a while to start. */
     private notebookPage: (path: string) => Promise<string>,
   ) {
-    this.editor = monaco.editor.create(host, {
-      model: null,
-      automaticLayout: true,
-      fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
-      fontSize: 13,
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      renderWhitespace: "selection",
-    });
+    this.editor = monaco.editor.create(host, { ...TEXT_OPTIONS, model: null });
     applyTheme();
     // Monaco measures characters once; measure again once the font is in.
     void document.fonts.load('13px "IBM Plex Mono"').then(() => monaco.editor.remeasureFonts());
@@ -188,6 +191,7 @@ export class Editors {
    */
   switchTo(from: string | null, key: string): boolean {
     this.generation++;
+    this.unsplit();
     if (this.active?.model) this.active.view = this.editor.saveViewState();
     if (from) this.kept.set(from, { tabs: this.tabs, active: this.active });
     for (const t of this.tabs) t.el.remove();
@@ -647,6 +651,7 @@ export class Editors {
         if (this.isDirty(tab)) return;
       }
     }
+    if (this.side?.tab === tab) this.unsplit();
     const i = this.tabs.indexOf(tab);
     this.tabs.splice(i, 1);
     tab.el.remove();
@@ -675,6 +680,33 @@ export class Editors {
       tab.preview = frame;
     }
     this.show(tab);
+  }
+
+  /**
+   * Show the active text file in a second editor beside the first, or close
+   * that one. It shares the file's model, so edits, undo and saving are one.
+   */
+  toggleSplit() {
+    if (this.side) return this.unsplit();
+    const tab = this.active;
+    if (!tab?.model) return;
+    const el = document.createElement("div");
+    el.id = "editor-side";
+    this.host.after(el);
+    const editor = monaco.editor.create(el, { ...TEXT_OPTIONS, model: tab.model });
+    editor.restoreViewState(this.editor.saveViewState());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save(tab));
+    editor.onDidChangeCursorPosition((e) => {
+      if (editor.hasTextFocus()) this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`);
+    });
+    this.side = { editor, el, tab };
+    editor.focus();
+  }
+
+  private unsplit() {
+    this.side?.editor.dispose();
+    this.side?.el.remove();
+    this.side = null;
   }
 
   closeActive() {
