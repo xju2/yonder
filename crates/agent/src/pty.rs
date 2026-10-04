@@ -250,7 +250,7 @@ fn open_pty(cols: u16, rows: u16) -> io::Result<(File, OwnedFd)> {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut ws,
+            &raw mut ws,
         )
     };
     if rc != 0 {
