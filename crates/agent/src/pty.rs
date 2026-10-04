@@ -241,15 +241,16 @@ fn command_dir() -> Option<PathBuf> {
 }
 
 fn open_pty(cols: u16, rows: u16) -> io::Result<(File, OwnedFd)> {
-    let ws = winsize(cols, rows);
+    // Mutable pointers fit both Linux's `*const` and macOS's `*mut` arguments.
+    let mut ws = winsize(cols, rows);
     let (mut master, mut slave) = (0, 0);
     let rc = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            &ws,
+            std::ptr::null_mut(),
+            &mut ws,
         )
     };
     if rc != 0 {

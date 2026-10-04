@@ -360,6 +360,22 @@ async fn resolve_folder(conn: &Connection, path: String) -> Result<String, CmdEr
     }
 }
 
+/// What the connect screen offers: this Mac, then the `Host` aliases in
+/// `~/.ssh/config`.
+#[tauri::command]
+fn ssh_hosts() -> Vec<String> {
+    let mut hosts = vec![yonder_client::LOCAL_HOST.to_string()];
+    if let Some(home) = std::env::var_os("HOME") {
+        let config = PathBuf::from(home).join(".ssh/config");
+        hosts.extend(
+            yonder_client::ssh_config::hosts(&config)
+                .into_iter()
+                .filter(|h| h != yonder_client::LOCAL_HOST),
+        );
+    }
+    hosts
+}
+
 /// Another folder on the connected host: no new ssh session.
 #[tauri::command]
 async fn open_folder(
@@ -1112,6 +1128,7 @@ fn main() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             connect,
+            ssh_hosts,
             open_folder,
             disconnect,
             list_dir,

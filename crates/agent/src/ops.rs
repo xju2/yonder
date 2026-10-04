@@ -41,10 +41,13 @@ fn home() -> String {
 }
 
 fn hello() -> HelloInfo {
-    let hostname = fs::read_to_string("/proc/sys/kernel/hostname")
-        .map(|s| s.trim().to_string())
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_default();
+    let mut buf = [0u8; 256];
+    let hostname = if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0 {
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..end]).into_owned()
+    } else {
+        String::new()
+    };
     HelloInfo {
         agent_version: env!("CARGO_PKG_VERSION").into(),
         protocol: PROTOCOL_VERSION,
@@ -454,6 +457,8 @@ mod tests {
     }
 
     #[test]
+    // APFS refuses names that are not UTF-8.
+    #[cfg(target_os = "linux")]
     fn non_utf8_names_are_listed_as_other() {
         use std::os::unix::ffi::OsStrExt;
         let d = tempfile::tempdir().unwrap();

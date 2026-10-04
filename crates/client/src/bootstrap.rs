@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
 use yonder_proto::{Op, Reply, MAGIC, PROTOCOL_VERSION};
 
@@ -89,6 +89,23 @@ pub fn find_agent(dirs: &[PathBuf], arch: &str) -> Option<PathBuf> {
             [
                 d.join(format!("yonder-agent-{arch}-linux")),
                 d.join(format!("{arch}-unknown-linux-musl/release/yonder-agent")),
+            ]
+        })
+        .find(|p| p.is_file())
+}
+
+/// The host name that means this Mac: the agent runs here, without ssh.
+pub const LOCAL_HOST: &str = "local";
+
+/// The agent built for this machine, from the packaged
+/// `yonder-agent-<arch>-macos` or a Cargo target directory.
+fn find_local_agent(dirs: &[PathBuf]) -> Option<PathBuf> {
+    let arch = std::env::consts::ARCH;
+    dirs.iter()
+        .flat_map(|d| {
+            [
+                d.join(format!("yonder-agent-{arch}-macos")),
+                d.join(format!("{arch}-apple-darwin/release/yonder-agent")),
             ]
         })
         .find(|p| p.is_file())
@@ -199,6 +216,9 @@ impl Session {
 /// Every step is reported through `log`.
 pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, ConnectError> {
     let host = opts.host.trim();
+    if host == LOCAL_HOST {
+        return connect_local(opts, log).await;
+    }
     if host.is_empty() || host.starts_with('-') || host.contains(char::is_whitespace) {
         return Err(ConnectError {
             step: "Checking the host".into(),
@@ -229,7 +249,7 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
             cmd.args(["-o", "BatchMode=yes"]);
         }
     }
-    let mut child = cmd
+    let child = cmd
         .args([
             "-T",
             "-o",
@@ -255,34 +275,7 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
             ),
         })?;
 
-    let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
-    {
-        let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
-        let tail = Arc::clone(&stderr_tail);
-        let log = Arc::clone(&log);
-        tokio::spawn(async move {
-            while let Ok(Some(line)) = lines.next_line().await {
-                log(LogLine {
-                    level: Level::Remote,
-                    message: line.clone(),
-                });
-                let mut tail = tail.lock().unwrap();
-                if tail.len() == 50 {
-                    tail.pop_front();
-                }
-                tail.push_back(line);
-            }
-        });
-    }
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    let mut s = Session {
-        child,
-        stdout,
-        stderr_tail: Arc::clone(&stderr_tail),
-        log: Arc::clone(&log),
-        step: String::new(),
-    };
+    let (mut s, mut stdin) = session(child, log);
 
     s.step(format!("Waiting for {host} to answer"));
     // Typing a password and a one-time code takes a while.
@@ -351,19 +344,120 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
             .await?;
     }
 
+    finish(s, stdin).await
+}
+
+/// Run the agent on this machine, without ssh. It is copied to
+/// `~/.cache/yonder` first, as on a remote, so the `yonder` command it links
+/// beside itself is not written into the signed app bundle. It starts through
+/// a login shell so it sees the `PATH` a terminal has (Homebrew, uv, …),
+/// which an app opened from the Dock does not.
+async fn connect_local(opts: &ConnectOptions, log: LogFn) -> Result<Connection, ConnectError> {
+    let step = "Looking for the agent for this Mac";
+    log(LogLine {
+        level: Level::Step,
+        message: step.into(),
+    });
+    let fail = |message: String, hint: Option<&str>| ConnectError {
+        step: step.into(),
+        message,
+        hint: hint.map(Into::into),
+    };
+    let Some(agent_path) = find_local_agent(&opts.agent_dirs) else {
+        return Err(fail(
+            format!("this copy of Yonder has no agent built for {}", std::env::consts::ARCH),
+            Some("Build the agents with scripts/build-agents.sh, or set YONDER_AGENT_DIR."),
+        ));
+    };
+    let agent = tokio::fs::read(&agent_path)
+        .await
+        .map_err(|e| fail(format!("could not read {}: {e}", agent_path.display()), None))?;
+    let home = std::env::var_os("HOME").ok_or_else(|| fail("HOME is not set".into(), None))?;
+    let dir = PathBuf::from(home).join(".cache/yonder");
+    let path = dir.join(format!("agent-{}", agent_hash(&agent)));
+    if !path.is_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = dir.join(format!("agent.tmp.{}", std::process::id()));
+        let installed = std::fs::create_dir_all(&dir)
+            .and_then(|_| std::fs::write(&tmp, &agent))
+            .and_then(|_| std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)))
+            .and_then(|_| std::fs::rename(&tmp, &path));
+        if let Err(e) = installed {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(fail(format!("could not install it in {}: {e}", dir.display()), None));
+        }
+    }
+    // Single quotes read the same in sh, bash, zsh, csh and fish.
+    let quoted = path.to_string_lossy().into_owned();
+    if quoted.contains('\'') {
+        return Err(fail(format!("{quoted} has a quote in it"), None));
+    }
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/sh".into());
+    let child = Command::new(&shell)
+        .args(["-l", "-c", &format!("exec '{quoted}'")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| fail(format!("could not run {shell}: {e}"), None))?;
+    let (s, stdin) = session(child, log);
+    finish(s, stdin).await
+}
+
+/// Watch a freshly started child: log its stderr and keep the last lines
+/// for error messages.
+fn session(mut child: Child, log: LogFn) -> (Session, ChildStdin) {
+    let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
+    {
+        let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
+        let tail = Arc::clone(&stderr_tail);
+        let log = Arc::clone(&log);
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = lines.next_line().await {
+                log(LogLine {
+                    level: Level::Remote,
+                    message: line.clone(),
+                });
+                let mut tail = tail.lock().unwrap();
+                if tail.len() == 50 {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+        });
+    }
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let s = Session {
+        child,
+        stdout,
+        stderr_tail,
+        log,
+        step: String::new(),
+    };
+    (s, stdin)
+}
+
+/// Past the agent's magic bytes: start routing and check that it answers.
+async fn finish(mut s: Session, stdin: ChildStdin) -> Result<Connection, ConnectError> {
     s.step("Starting the agent");
     s.magic(Duration::from_secs(30)).await?;
 
     let Session {
         child,
         stdout,
-        log: session_log,
+        stderr_tail,
+        log,
         ..
     } = s;
     // What ssh said while logging in (a mistyped password, say) is history;
     // a later disconnect should not be blamed on it.
     stderr_tail.lock().unwrap().clear();
-    let conn = Connection::start(child, stdin, stdout, stderr_tail, session_log);
+    let conn = Connection::start(child, stdin, stdout, stderr_tail, Arc::clone(&log));
     let info = match timeout(Duration::from_secs(30), conn.call(Op::Hello)).await {
         Ok(Ok(Reply::Hello(info))) => info,
         other => {

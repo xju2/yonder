@@ -58,6 +58,19 @@ function saveRecent(r: Recent) {
   }
 }
 
+/** Offer this Mac and the hosts in ~/.ssh/config; typing any destination still works. */
+async function paintHosts() {
+  const hosts = await api.sshHosts().catch(() => ["local"]);
+  $("host-list").replaceChildren(
+    ...hosts.map((h) => {
+      const o = document.createElement("option");
+      o.value = h;
+      if (h === "local") o.label = "Local folder on this Mac";
+      return o;
+    }),
+  );
+}
+
 function paintRecent() {
   const box = $("recent");
   const list = loadRecent();
@@ -495,6 +508,7 @@ function showConnect() {
   hostInput.value = conn?.host ?? "";
   folderInput.value = "";
   paintRecent();
+  void paintHosts();
   (conn ? folderInput : hostInput).focus();
 }
 
@@ -655,3 +669,4 @@ void getCurrentWindow().onCloseRequested(async (event) => {
 });
 
 paintRecent();
+void paintHosts();

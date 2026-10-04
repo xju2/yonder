@@ -66,6 +66,8 @@ export const currentConnection = () => conn;
 
 export const connect = (host: string, path: string) =>
   invoke<ConnInfo>("connect", { host, path });
+/** `local` (this Mac), then the Host aliases in ~/.ssh/config. */
+export const sshHosts = () => invoke<string[]>("ssh_hosts");
 /** Resolve another folder on the connected host; no new ssh session. */
 export const openFolder = (id: number, path: string) => invoke<string>("open_folder", { conn: id, path });
 export const disconnect = (id: number) => invoke<void>("disconnect", { conn: id });

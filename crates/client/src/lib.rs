@@ -5,14 +5,18 @@
 //! binary if the remote does not have this exact build yet, and then `exec`s
 //! it. Using the system `ssh` means `~/.ssh/config`, ProxyJump, ssh-agent and
 //! short-lived certificates all work as they do in a terminal; using a single
-//! session means one authentication per connect.
+//! session means one authentication per connect. The host [`LOCAL_HOST`]
+//! runs the agent on this machine instead, without ssh.
 
 pub mod askpass;
 mod bootstrap;
 mod connection;
 pub mod git;
+pub mod ssh_config;
 
-pub use bootstrap::{connect, find_agent, ConnectError, ConnectOptions, SUPPORTED_ARCHES};
+pub use bootstrap::{
+    connect, find_agent, ConnectError, ConnectOptions, LOCAL_HOST, SUPPORTED_ARCHES,
+};
 pub use connection::Connection;
 
 /// A line for the connection log the app shows while connecting.

@@ -17,6 +17,12 @@ from `~/.ssh/config`. Yonder runs your own `ssh` binary, so ProxyJump,
 ssh-agent, ControlMaster and short-lived keys or certificates work as they do
 in a terminal.
 
+The Host field lists `local` and the `Host` aliases in `~/.ssh/config`
+(and the files it `Include`s); you can also type any other destination.
+**`local`** opens a folder on this Mac: no ssh, but everything else works
+the same. The agent starts through your login shell, so language servers,
+`git` and Jupyter are found on the `PATH` a terminal has.
+
 When ssh asks something (a password, a password plus one-time code, or
 whether to trust an unknown host key), Yonder shows the question in a
 dialog. Cancel ends that login attempt.
@@ -112,7 +118,7 @@ ownership survive.
 | Path | What |
 |---|---|
 | `crates/proto` | Messages and framing shared by both sides |
-| `crates/agent` | `yonder-agent`, the remote side: files, and shells on pseudo-terminals |
+| `crates/agent` | `yonder-agent`, the remote side: files, and shells on pseudo-terminals (also built for macOS, for `local`) |
 | `crates/client` | Starts the agent over ssh; request routing; git parsing |
 | `app/src-tauri` | Desktop process: Tauri commands over the client |
 | `app/src` | UI: file tree, tabs, Monaco editor, image and PDF viewers ([pdf.js](https://mozilla.github.io/pdf.js/)), terminals ([xterm.js](https://xtermjs.org/)) |

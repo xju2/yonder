@@ -10,7 +10,8 @@
     <section id="connect-view">
       <form id="connect-form" class="card">
         <h1>Yonder</h1>
-        <label>Host <input id="host" placeholder="perlmutter" autocomplete="off" spellcheck="false" required /></label>
+        <label>Host <input id="host" list="host-list" placeholder="local, or an ssh host" autocomplete="off" spellcheck="false" required /></label>
+        <datalist id="host-list"></datalist>
         <label>Folder <input id="folder" placeholder="~/project" autocomplete="off" spellcheck="false" /></label>
         <button id="connect-btn" type="submit">Connect</button>
         <button id="connect-cancel" type="button" hidden>Back to the open workspace</button>
