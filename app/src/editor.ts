@@ -286,6 +286,8 @@ export class Editors {
     } else {
       const uri = monaco.Uri.from({ scheme: "yonder", authority: String(++modelSeq), path });
       tab.model = monaco.editor.createModel(file.text, languageFor(path), uri);
+      // Make needs real tabs before recipe lines.
+      if (tab.model.getLanguageId() === "makefile") tab.model.updateOptions({ insertSpaces: false });
       tab.savedVersion = tab.model.getAlternativeVersionId();
       tab.model.onDidChangeContent(() => this.paintTab(tab));
     }

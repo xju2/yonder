@@ -112,3 +112,70 @@ languages.setMonarchTokensProvider("ignore", {
     ],
   },
 });
+
+languages.register({
+  id: "makefile",
+  extensions: [".mk", ".mak"],
+  filenames: ["Makefile", "makefile", "GNUmakefile"],
+  filenamePatterns: ["Makefile.*", "*.make"],
+  aliases: ["Makefile", "make"],
+});
+languages.setLanguageConfiguration("makefile", {
+  comments: { lineComment: "#" },
+  brackets: [["(", ")"], ["{", "}"]],
+  autoClosingPairs: [
+    { open: "(", close: ")" },
+    { open: "{", close: "}" },
+  ],
+});
+languages.setMonarchTokensProvider("makefile", {
+  defaultToken: "",
+  tokenPostfix: ".make",
+  directives: [
+    "include", "-include", "sinclude", "define", "endef", "ifeq", "ifneq", "ifdef", "ifndef",
+    "else", "endif", "export", "unexport", "override", "private", "vpath", "undefine",
+  ],
+  functions: [
+    "subst", "patsubst", "strip", "findstring", "filter", "filter-out", "sort", "word", "words",
+    "wordlist", "firstword", "lastword", "dir", "notdir", "suffix", "basename", "addsuffix",
+    "addprefix", "join", "wildcard", "realpath", "abspath", "if", "or", "and", "foreach",
+    "file", "call", "value", "eval", "origin", "flavor", "error", "warning", "info", "shell", "guile",
+  ],
+  tokenizer: {
+    root: [
+      // A recipe line: shell, after a tab.
+      // @ (silent), - (ignore errors) and + (run with -n) lead it.
+      [/^\t[@+-]+/, "keyword", "@recipe"],
+      [/^\t/, "", "@recipe"],
+      [/#.*$/, "comment"],
+      // NAME = value, and the other assignment operators.
+      [/^(\s*)([\w.-]+)(\s*)(::?=|:::=|\?=|\+=|!=|=)/, ["", "variable.name", "", "operator"]],
+      // Targets, up to a single colon (not :=).
+      [/^[^\s:#=][^:#=]*(?=::?(?!=))/, "type.identifier"],
+      [/^\s*-?[a-z]+\b/, { cases: { "@directives": "keyword", "@default": "" } }],
+      { include: "@refs" },
+      [/\\$/, "string.escape"],
+    ],
+    recipe: [
+      [/^[^\t]/, { token: "@rematch", next: "@pop" }],
+      [/^\t[@+-]+/, "keyword"],
+      [/#.*$/, "comment"],
+      { include: "@refs" },
+      [/[^$#]+|./, ""],
+    ],
+    refs: [
+      [/\$[@<^*?+%|$]/, "variable"],
+      [/\$[({]/, "variable", "@ref"],
+      [/\$\w/, "variable"],
+    ],
+    // $(name) or $(function args), which nest.
+    ref: [
+      [/[\w-]+(?=\s)/, { cases: { "@functions": "keyword", "@default": "variable" } }],
+      [/[\w.-]+(?=[)}:])/, "variable"],
+      { include: "@refs" },
+      [/[)}]/, "variable", "@pop"],
+      [/[^$)}\s]+/, ""],
+      [/\s+|[^)}]/, ""],
+    ],
+  },
+});

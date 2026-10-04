@@ -32,7 +32,7 @@ const ICONS = {
 /** File types by extension, for the icon's colour. */
 const FILE_TYPES: Record<string, string> = {};
 for (const [type, exts] of Object.entries({
-  code: "c cc cpp cxx h hh hpp cu py pyx ipynb rs go js mjs ts tsx jsx java kt jl f f90 f95 for r m sh bash zsh fish pl lua rb swift scala",
+  code: "c cc cpp cxx h hh hpp cu py pyx ipynb rs go js mjs ts tsx jsx java kt jl f f90 f95 for r m sh bash zsh fish pl lua rb swift scala makefile gnumakefile mk mak",
   data: "json jsonl yaml yml toml ini cfg conf csv tsv xml h5 hdf5 root npy npz parquet pkl sql lock",
   doc: "md markdown txt rst tex bib org log",
   media: "png jpg jpeg gif svg webp bmp tif tiff ico pdf eps",
