@@ -505,11 +505,9 @@ mod tests {
         assert_eq!(code, Some(128), "{stderr}");
         assert!(stderr.contains("not a git repository"), "{stderr}");
         assert_eq!(git(&["init", "-q"], 1 << 20).0, Some(0));
-        let (code, out, _, truncated) = git(&["--version"], 4);
-        assert_eq!(
-            (code.is_some(), out.as_slice(), truncated),
-            (true, &b"git "[..], true)
-        );
+        // Truncating kills git, so whether it left an exit code is a race.
+        let (_, out, _, truncated) = git(&["--version"], 4);
+        assert_eq!((out.as_slice(), truncated), (&b"git "[..], true));
     }
 
     #[test]
