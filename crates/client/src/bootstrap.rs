@@ -365,13 +365,19 @@ async fn connect_local(opts: &ConnectOptions, log: LogFn) -> Result<Connection, 
     };
     let Some(agent_path) = find_local_agent(&opts.agent_dirs) else {
         return Err(fail(
-            format!("this copy of Yonder has no agent built for {}", std::env::consts::ARCH),
+            format!(
+                "this copy of Yonder has no agent built for {}",
+                std::env::consts::ARCH
+            ),
             Some("Build the agents with scripts/build-agents.sh, or set YONDER_AGENT_DIR."),
         ));
     };
-    let agent = tokio::fs::read(&agent_path)
-        .await
-        .map_err(|e| fail(format!("could not read {}: {e}", agent_path.display()), None))?;
+    let agent = tokio::fs::read(&agent_path).await.map_err(|e| {
+        fail(
+            format!("could not read {}: {e}", agent_path.display()),
+            None,
+        )
+    })?;
     let home = std::env::var_os("HOME").ok_or_else(|| fail("HOME is not set".into(), None))?;
     let dir = PathBuf::from(home).join(".cache/yonder");
     let path = dir.join(format!("agent-{}", agent_hash(&agent)));
@@ -384,7 +390,10 @@ async fn connect_local(opts: &ConnectOptions, log: LogFn) -> Result<Connection, 
             .and_then(|_| std::fs::rename(&tmp, &path));
         if let Err(e) = installed {
             let _ = std::fs::remove_file(&tmp);
-            return Err(fail(format!("could not install it in {}: {e}", dir.display()), None));
+            return Err(fail(
+                format!("could not install it in {}: {e}", dir.display()),
+                None,
+            ));
         }
     }
     // Single quotes read the same in sh, bash, zsh, csh and fish.

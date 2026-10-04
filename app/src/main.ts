@@ -530,10 +530,10 @@ form.addEventListener("submit", async (e) => {
   connectLog.replaceChildren();
   connectError.hidden = true;
   connectBtn.disabled = true;
-  connectBtn.textContent = "Connecting…";
+  connectBtn.textContent = "Opening…";
   await openWorkspace(hostInput.value.trim(), folderInput.value.trim());
   connectBtn.disabled = false;
-  connectBtn.textContent = "Connect";
+  connectBtn.textContent = "Open";
 });
 
 $("refresh-tree").addEventListener("click", refreshTree);

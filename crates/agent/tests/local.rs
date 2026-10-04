@@ -30,12 +30,23 @@ async fn local_host_runs_the_agent_without_ssh() {
     let conn = connect(&opts, Arc::clone(&log)).await.unwrap();
     assert_eq!(conn.info().home, home.to_string_lossy());
     std::fs::write(home.join("a.txt"), "hi").unwrap();
-    match conn.call(Op::ListDir { path: home.to_string_lossy().into() }).await.unwrap() {
+    match conn
+        .call(Op::ListDir {
+            path: home.to_string_lossy().into(),
+        })
+        .await
+        .unwrap()
+    {
         Reply::Entries(e) => assert!(e.iter().any(|e| e.name == "a.txt")),
         other => panic!("{other:?}"),
     }
     drop(conn);
     // The second connect reuses the installed copy.
     let _conn = connect(&opts, log).await.unwrap();
-    assert_eq!(std::fs::read_dir(home.join(".cache/yonder")).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::read_dir(home.join(".cache/yonder"))
+            .unwrap()
+            .count(),
+        1
+    );
 }

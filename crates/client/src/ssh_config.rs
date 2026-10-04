@@ -99,7 +99,10 @@ mod tests {
         std::fs::write(d.join("config.d/b.conf"), "Host bee\n").unwrap();
         std::fs::write(d.join("config.d/a.conf"), "Host ay\n").unwrap();
         std::fs::write(d.join("config.d/skip.txt"), "Host no\n").unwrap();
-        assert_eq!(hosts(&d.join("config")), ["ay", "bee", "pl", "perlmutter", "dtn"]);
+        assert_eq!(
+            hosts(&d.join("config")),
+            ["ay", "bee", "pl", "perlmutter", "dtn"]
+        );
         assert!(hosts(&d.join("missing")).is_empty());
         std::fs::remove_dir_all(d).unwrap();
     }
