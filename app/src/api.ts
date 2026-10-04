@@ -248,6 +248,10 @@ export const copyText = (text: string) => invoke<void>("copy_text", { text });
 export const copyPng = (png: Uint8Array) => invoke<void>("copy_png", png);
 
 /** A File or View menu item (or its shortcut) was chosen. */
+/** Folders macOS asked Yonder to open (`yonder .`) since the last call. */
+export const takeOpened = () => invoke<string[]>("take_opened");
+export const onOpened = (f: () => void): Promise<UnlistenFn> => listen("opened", () => f());
+
 export const onMenu = (f: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("menu", (e) => f(e.payload));
 

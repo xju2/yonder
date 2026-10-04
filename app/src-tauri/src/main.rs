@@ -46,6 +46,8 @@ struct AppState {
     streams: Streams,
     /// Local ports that tunnel to a remote port, by connection and port.
     tunnels: Mutex<HashMap<(u64, u16), u16>>,
+    /// Folders macOS asked us to open (`yonder .`), until the UI takes them.
+    opened: Mutex<Vec<String>>,
 }
 
 type Streams = Arc<Mutex<HashMap<u64, (u64, Sink)>>>;
@@ -1016,6 +1018,12 @@ fn copy_png(request: tauri::ipc::Request<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// Folders handed to the app by macOS since the UI last asked.
+#[tauri::command]
+fn take_opened(state: State<'_, AppState>) -> Vec<String> {
+    std::mem::take(&mut state.opened.lock().unwrap())
+}
+
 /// Whether a quit may go ahead now. While a window is open, the UI decides:
 /// it checks for unsaved edits at that moment, asks if there are any, and
 /// calls `quit_app`. A copy of that state kept here could be stale.
@@ -1154,7 +1162,8 @@ fn main() {
             quit_app,
             copy_text,
             copy_png,
-            askpass_answer
+            askpass_answer,
+            take_opened
         ])
         .setup(|app| {
             start_askpass(app.handle());
@@ -1173,6 +1182,18 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while starting Yonder")
         .run(|app, event| {
+            // `open -a Yonder <folder>`, as the `yonder` script does. This can
+            // come before the UI listens, so it is kept until the UI takes it.
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Opened { urls } = &event {
+                let paths = urls.iter().filter_map(|u| u.to_file_path().ok());
+                app.state::<AppState>()
+                    .opened
+                    .lock()
+                    .unwrap()
+                    .extend(paths.map(|p| p.to_string_lossy().into_owned()));
+                let _ = app.emit("opened", ());
+            }
             // Quitting from the Dock, or the last window closing: the UI
             // decides. `code` is set when we exit on purpose.
             if let RunEvent::ExitRequested {

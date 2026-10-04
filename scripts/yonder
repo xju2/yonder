@@ -1,0 +1,3 @@
+#!/bin/sh
+# Open folders on this Mac in Yonder: `yonder .`
+exec open -a Yonder "${@:-.}"

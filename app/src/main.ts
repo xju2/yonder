@@ -668,5 +668,12 @@ void getCurrentWindow().onCloseRequested(async (event) => {
   await confirmQuit();
 });
 
+// `yonder .` in a terminal: open that folder on this Mac. Listen first, so
+// none sent while the window loads is missed.
+async function openHanded() {
+  for (const folder of await api.takeOpened()) await openWorkspace("local", folder);
+}
+void api.onOpened(() => void openHanded()).then(openHanded);
+
 paintRecent();
 void paintHosts();

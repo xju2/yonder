@@ -17,6 +17,9 @@ fi
 rm -rf /Applications/Yonder.app
 cp -R target/release/bundle/macos/Yonder.app /Applications/
 echo "Installed /Applications/Yonder.app"
+# `yonder .` opens the current folder.
+mkdir -p ~/.local/bin
+ln -sf /Applications/Yonder.app/Contents/Resources/yonder ~/.local/bin/yonder
 open -a /Applications/Yonder.app
 # A zip to copy to other Macs (ditto keeps the bundle's symlinks and signature).
 rm -f target/release/bundle/Yonder.zip
