@@ -1018,6 +1018,33 @@ fn copy_png(request: tauri::ipc::Request<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// Links /usr/local/bin/yonder to the script in the bundle, asking for an
+/// administrator's password as macOS does for that folder.
+#[tauri::command]
+fn install_cli(app: AppHandle) -> Result<String, String> {
+    let script = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("yonder");
+    let out = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "do shell script \"mkdir -p /usr/local/bin && ln -sf \" & quoted form of item 1 of argv & \" /usr/local/bin/yonder\" with administrator privileges",
+            "-e",
+            "end run",
+        ])
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("osascript: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok("/usr/local/bin/yonder".into())
+}
+
 /// Folders handed to the app by macOS since the UI last asked.
 #[tauri::command]
 fn take_opened(state: State<'_, AppState>) -> Vec<String> {
@@ -1045,6 +1072,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Yonder")
         .about(None)
+        .separator()
+        .item(&MenuItemBuilder::with_id("install-cli", "Install 'yonder' Command…").build(app)?)
         .separator()
         .services()
         .separator()
@@ -1163,7 +1192,8 @@ fn main() {
             copy_text,
             copy_png,
             askpass_answer,
-            take_opened
+            take_opened,
+            install_cli
         ])
         .setup(|app| {
             start_askpass(app.handle());
@@ -1174,7 +1204,7 @@ fn main() {
             "quit" if request_quit(app) => app.exit(0),
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
             | "toggle-sidebar" | "markdown-preview" | "switch-workspace"
-            | "new-workspace" | "find-in-folder") => {
+            | "new-workspace" | "find-in-folder" | "install-cli") => {
                 let _ = app.emit("menu", id);
             }
             _ => {}

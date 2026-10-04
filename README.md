@@ -22,9 +22,8 @@ The Host field lists `local` and the `Host` aliases in `~/.ssh/config`
 **`local`** opens a folder on this Mac: no ssh, but everything else works
 the same. The agent starts through your login shell, so language servers,
 `git` and Jupyter are found on the `PATH` a terminal has. From a terminal,
-`yonder .` opens the current folder as a `local` workspace; link the command
-onto your `PATH` once with
-`ln -s /Applications/Yonder.app/Contents/Resources/yonder ~/.local/bin/yonder`.
+`yonder .` opens the current folder as a `local` workspace; install the
+command once with **Yonder › Install 'yonder' Command…**.
 
 When ssh asks something (a password, a password plus one-time code, or
 whether to trust an unknown host key), Yonder shows the question in a

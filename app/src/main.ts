@@ -324,7 +324,9 @@ $("toggle-sidebar").addEventListener("click", toggleSidebar);
 
 // Menu items, so their shortcuts work wherever the keyboard is.
 void api.onMenu((id) => {
-  if (!conn || document.querySelector("dialog[open]")) return;
+  if (document.querySelector("dialog[open]")) return;
+  if (id === "install-cli") return void installCli();
+  if (!conn) return;
   if (id === "new-workspace") return showConnect();
   if (workspace.hidden) return;
   if (id === "go-to-file") finder.open();
@@ -667,6 +669,17 @@ void getCurrentWindow().onCloseRequested(async (event) => {
   event.preventDefault();
   await confirmQuit();
 });
+
+async function installCli() {
+  try {
+    const at = await api.installCli();
+    await tell("Installed the yonder command.", `${at} is linked. In a terminal, \`yonder .\` opens the current folder.`);
+  } catch (err) {
+    const msg = String(err);
+    // Cancelling the password prompt is not an error worth showing.
+    if (!/User canceled|-128/.test(msg)) await tell("Could not install the yonder command.", msg);
+  }
+}
 
 // `yonder .` in a terminal: open that folder on this Mac. Listen first, so
 // none sent while the window loads is missed.

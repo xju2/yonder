@@ -252,6 +252,9 @@ export const copyPng = (png: Uint8Array) => invoke<void>("copy_png", png);
 export const takeOpened = () => invoke<string[]>("take_opened");
 export const onOpened = (f: () => void): Promise<UnlistenFn> => listen("opened", () => f());
 
+/** Put the `yonder` command on the PATH; returns where it went. */
+export const installCli = () => invoke<string>("install_cli");
+
 export const onMenu = (f: (id: string) => void): Promise<UnlistenFn> =>
   listen<string>("menu", (e) => f(e.payload));
 
