@@ -57,6 +57,13 @@ dialog. Cancel ends that login attempt.
   remote: basedpyright, pyright or pylsp from the folder's `.venv`, `venv` or
   `env` first, then `PATH`; clangd from `PATH` (it reads
   `compile_commands.json`). With none, the status bar says what to install.
+- **LaTeX:** `.tex`, `.sty` and `.cls` files are highlighted (commands,
+  environments, math, comments), and <kbd>%</kbd> toggles comments. Typing
+  `\cite{` (or `\citep`, `\autocite`, …) completes keys from the `.bib` files
+  named by `\bibliography` or `\addbibresource`, or else those beside the file,
+  showing author, year and title; filter by any of them. `\ref{`, `\eqref{` and
+  `\cref{` complete labels from the file and the files it `\input`s. Compile
+  where you like, in the terminal, and open the PDF in the viewer.
 - **Notebooks:** a `.ipynb` file opens in JupyterLab in a tab, running on
   the remote in the workspace folder. As in VS Code, the kernel is the Python
   of the nearest `.venv`, `venv` or `env` (uv's included), looked for from the

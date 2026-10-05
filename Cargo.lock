@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "yonder-agent"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "tempfile",
@@ -4412,7 +4412,7 @@ dependencies = [
 
 [[package]]
 name = "yonder-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "tauri",
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "yonder-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "sha2",
@@ -4434,7 +4434,7 @@ dependencies = [
 
 [[package]]
 name = "yonder-proto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rmp-serde",
  "serde",
