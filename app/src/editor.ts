@@ -9,6 +9,7 @@ import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { marked } from "marked";
 import "./languages";
+import "./latex";
 // The code font, bundled: Zed's default is a variant of IBM Plex Mono.
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/400-italic.css";
