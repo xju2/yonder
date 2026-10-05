@@ -179,3 +179,58 @@ languages.setMonarchTokensProvider("makefile", {
     ],
   },
 });
+
+languages.register({
+  id: "latex",
+  extensions: [".tex", ".sty", ".cls", ".ltx", ".dtx", ".bbx", ".cbx"],
+  aliases: ["LaTeX", "latex", "TeX"],
+});
+languages.setLanguageConfiguration("latex", {
+  comments: { lineComment: "%" },
+  brackets: [["{", "}"], ["[", "]"], ["(", ")"]],
+  autoClosingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: "$", close: "$", notIn: ["comment"] },
+    { open: "`", close: "'" },
+  ],
+  surroundingPairs: [
+    { open: "{", close: "}" },
+    { open: "[", close: "]" },
+    { open: "(", close: ")" },
+    { open: "$", close: "$" },
+  ],
+});
+languages.setMonarchTokensProvider("latex", {
+  defaultToken: "",
+  tokenPostfix: ".latex",
+  tokenizer: {
+    root: [
+      [/%.*$/, "comment"],
+      // \begin{env} / \end{env}: the environment name is a type.
+      [/(\\(?:begin|end))(\s*\{)([^}]*)(\})/, ["keyword", "delimiter.curly", "type.identifier", "delimiter.curly"]],
+      [/\\verb\*?(.)(?:(?!\1).)*\1/, "string"],
+      [/\\\[/, "string", "@displayMath"],
+      [/\\\(/, "string", "@inlineMath"],
+      [/\$\$/, "string", "@displayDollar"],
+      [/\$/, "string", "@inlineDollar"],
+      [/\\[a-zA-Z@]+\*?/, "keyword"],
+      [/\\./, "string.escape"],
+      [/[{}[\]]/, "@brackets"],
+      [/[&~]/, "operator"],
+    ],
+    math: [
+      [/%.*$/, "comment"],
+      [/\\[a-zA-Z@]+\*?/, "keyword"],
+      [/\\./, "string.escape"],
+      [/[_^&]/, "operator"],
+      [/\d+(\.\d+)?/, "number"],
+      [/[^\\%_^&\d$]+|./, "string"],
+    ],
+    inlineDollar: [[/\$/, "string", "@pop"], { include: "math" }],
+    displayDollar: [[/\$\$/, "string", "@pop"], { include: "math" }],
+    inlineMath: [[/\\\)/, "string", "@pop"], { include: "math" }],
+    displayMath: [[/\\\]/, "string", "@pop"], { include: "math" }],
+  },
+});
