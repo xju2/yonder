@@ -139,6 +139,11 @@ const TEXT_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
   renderWhitespace: "selection",
+  // No suggestions while typing; Ctrl+Space (or a trigger character such as
+  // the { of \cite) still asks for them.
+  quickSuggestions: false,
+  wordBasedSuggestions: "off",
+  parameterHints: { enabled: false },
 };
 
 export class Editors {
