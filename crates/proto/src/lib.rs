@@ -164,6 +164,8 @@ pub enum Event {
     /// The process exited or the socket closed. `code` is `None` for a
     /// socket or a signal.
     StreamExit { id: u64, code: Option<i32> },
+    /// `yonder FILE` ran outside the app's terminals: show this file.
+    OpenFile { path: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

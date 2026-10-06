@@ -249,7 +249,10 @@ export const copyPng = (png: Uint8Array) => invoke<void>("copy_png", png);
 
 /** A File or View menu item (or its shortcut) was chosen. */
 /** Folders macOS asked Yonder to open (`yonder .`) since the last call. */
-export const takeOpened = () => invoke<string[]>("take_opened");
+export const takeOpened = () => invoke<{ path: string; is_dir: boolean }[]>("take_opened");
+/** `yonder FILE` ran in a terminal outside the app, on `generation`'s host. */
+export const onOpenFile = (f: (e: { generation: number; path: string }) => void): Promise<UnlistenFn> =>
+  listen<{ generation: number; path: string }>("open-file", (e) => f(e.payload));
 export const onOpened = (f: () => void): Promise<UnlistenFn> => listen("opened", () => f());
 
 /** Put the `yonder` command on the PATH; returns where it went. */

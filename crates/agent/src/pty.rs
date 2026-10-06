@@ -226,7 +226,7 @@ fn gone(pty: u64) -> Error {
 /// shell in one of our terminals can run `yonder FILE` to open the file in
 /// the app. The link is relative and remade only when it no longer resolves,
 /// for instance after the agent it pointed to was replaced.
-fn command_dir() -> Option<PathBuf> {
+pub fn command_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.join("bin");
     let link = dir.join("yonder");

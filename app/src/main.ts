@@ -685,8 +685,21 @@ async function installCli() {
 // `yonder .` in a terminal: open that folder on this Mac. Listen first, so
 // none sent while the window loads is missed.
 async function openHanded() {
-  for (const folder of await api.takeOpened()) await openWorkspace("local", folder);
+  for (const o of await api.takeOpened()) {
+    if (o.is_dir) await openWorkspace("local", o.path);
+    else await showFile("local", o.path);
+  }
 }
+
+/** Open a file on `host`, switching to a workspace there if this one is elsewhere. */
+async function showFile(host: string, path: string) {
+  if (conn?.host !== host && !(await openWorkspace(host, path.replace(/\/[^/]*$/, "") || "/"))) return;
+  await editors.open(path);
+}
+// `yonder FILE` in an OS terminal, here or over ssh.
+void api.onOpenFile((e) => {
+  for (const [host, c] of hosts) if (c.generation === e.generation) void showFile(host, e.path);
+});
 void api.onOpened(() => void openHanded()).then(openHanded);
 
 paintRecent();

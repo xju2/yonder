@@ -46,8 +46,8 @@ struct AppState {
     streams: Streams,
     /// Local ports that tunnel to a remote port, by connection and port.
     tunnels: Mutex<HashMap<(u64, u16), u16>>,
-    /// Folders macOS asked us to open (`yonder .`), until the UI takes them.
-    opened: Mutex<Vec<String>>,
+    /// Folders and files macOS asked us to open (`yonder .`), until the UI takes them.
+    opened: Mutex<Vec<Opened>>,
 }
 
 type Streams = Arc<Mutex<HashMap<u64, (u64, Sink)>>>;
@@ -89,6 +89,26 @@ struct PtyExitEvent {
     code: Option<i32>,
 }
 
+#[derive(Serialize, Clone)]
+struct OpenFileEvent {
+    generation: u64,
+    path: String,
+}
+
+#[derive(Serialize)]
+struct Opened {
+    path: String,
+    is_dir: bool,
+}
+
+/// Bring the window forward, for a file opened from another app's terminal.
+fn focus_window(app: &AppHandle) {
+    if let Some(w) = app.webview_windows().into_values().next() {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 /// Route the agent's terminal and stream events until the connection ends.
 fn forward_events(
     app: AppHandle,
@@ -124,6 +144,11 @@ fn forward_events(
                     }
                     continue;
                 }
+                Event::OpenFile { path } => {
+                    focus_window(&app);
+                    let _ = app.emit("open-file", OpenFileEvent { generation, path });
+                    continue;
+                }
                 _ => {}
             }
             let mut all = terminals.lock().unwrap();
@@ -137,7 +162,7 @@ fn forward_events(
                     }
                     None => t.early_output.entry(pty).or_default().push(data),
                 },
-                Event::StreamOutput { .. } | Event::StreamExit { .. } => {}
+                Event::StreamOutput { .. } | Event::StreamExit { .. } | Event::OpenFile { .. } => {}
                 Event::PtyExit { pty, code } => {
                     if t.channels.remove(&pty).is_some() {
                         let _ = app.emit(
@@ -1045,9 +1070,9 @@ fn install_cli(app: AppHandle) -> Result<String, String> {
     Ok("/usr/local/bin/yonder".into())
 }
 
-/// Folders handed to the app by macOS since the UI last asked.
+/// Folders and files handed to the app by macOS since the UI last asked.
 #[tauri::command]
-fn take_opened(state: State<'_, AppState>) -> Vec<String> {
+fn take_opened(state: State<'_, AppState>) -> Vec<Opened> {
     std::mem::take(&mut state.opened.lock().unwrap())
 }
 
@@ -1226,7 +1251,11 @@ fn main() {
                     .opened
                     .lock()
                     .unwrap()
-                    .extend(paths.map(|p| p.to_string_lossy().into_owned()));
+                    .extend(paths.map(|p| Opened {
+                        is_dir: p.is_dir(),
+                        path: p.to_string_lossy().into_owned(),
+                    }));
+                focus_window(app);
                 let _ = app.emit("opened", ());
             }
             // Quitting from the Dock, or the last window closing: the UI

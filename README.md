@@ -24,6 +24,9 @@ the same. The agent starts through your login shell, so language servers,
 `git` and Jupyter are found on the `PATH` a terminal has. From a terminal,
 `yonder .` opens the current folder as a `local` workspace; install the
 command once with **Yonder › Install 'yonder' Command…**.
+`yonder FILE` opens a file in the existing window, from a Yonder terminal or
+from any other terminal, here or over ssh to a host Yonder is connected to.
+On a remote, put `~/.cache/yonder/bin` on the `PATH` of your login shell.
 
 When ssh asks something (a password, a password plus one-time code, or
 whether to trust an unknown host key), Yonder shows the question in a

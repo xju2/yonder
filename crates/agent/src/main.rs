@@ -45,6 +45,9 @@ fn serve() -> io::Result<()> {
             std::process::exit(1);
         }
     });
+    // So `yonder FILE` works from an OS terminal on this machine, too.
+    let socket = open::listen(Arc::clone(&emit));
+    let _ = pty::command_dir();
     let ptys = pty::Ptys::new(Arc::clone(&emit));
     let streams = streams::Streams::new(Arc::clone(&emit));
 
@@ -82,5 +85,8 @@ fn serve() -> io::Result<()> {
         }
     }
     streams.close_all();
+    if let Some(s) = socket {
+        let _ = std::fs::remove_file(s);
+    }
     Ok(())
 }
