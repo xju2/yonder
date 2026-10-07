@@ -1237,6 +1237,10 @@ fn main() {
             | "new-workspace" | "find-in-folder" | "install-cli") => {
                 let _ = app.emit("menu", id);
             }
+            // The right-click menus in the UI: their own actions never fire.
+            id if id.starts_with("ctx-") => {
+                let _ = app.emit("menu", id);
+            }
             _ => {}
         })
         .build(tauri::generate_context!())

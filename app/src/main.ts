@@ -252,30 +252,37 @@ async function copyPath(path: string | null, relative: boolean) {
 }
 
 let compareBase: string | null = null;
+/** What the right-click menu's items do; they come back as "ctx-*" menu events. */
+let ctxActions: Record<string, () => void> = {};
 
-const pathMenu = (path: string, reload: (() => void) | null = null) =>
-  void Menu.new({
-    items: [
-      {
-        text: "Select for Comparison",
-        action: () => {
-          compareBase = path;
-          status(`Selected ${baseName(path)} for comparison.`);
-        },
+const pathMenu = (path: string, reload: (() => void) | null = null) => {
+  const items: [string, string, (() => void) | null, boolean?][] = [
+    [
+      "ctx-select",
+      "Select for Comparison",
+      () => {
+        compareBase = path;
+        status(`Selected ${baseName(path)} for comparison.`);
       },
-      {
-        text: compareBase ? `Compare with Selected (${baseName(compareBase)})` : "Compare with Selected",
-        enabled: !!compareBase && compareBase !== path,
-        action: () => {
-          if (compareBase) void editors.compare(compareBase, path);
-        },
-      },
-      ...(reload ? [{ text: "Reload", action: reload }] : []),
-      ...(/\.ipynb$/i.test(path) && conn ? [{ text: "Show Jupyter Log", action: showJupyterLog }] : []),
-      { text: "Copy Path", action: () => void copyPath(path, false) },
-      { text: "Copy Relative Path", action: () => void copyPath(path, true) },
     ],
+    [
+      "ctx-compare",
+      compareBase ? `Compare with Selected (${baseName(compareBase)})` : "Compare with Selected",
+      () => compareBase && void editors.compare(compareBase, path),
+      !!compareBase && compareBase !== path,
+    ],
+    ["ctx-reload", "Reload", reload],
+    ["ctx-jupyter", "Show Jupyter Log", /\.ipynb$/i.test(path) && conn ? showJupyterLog : null],
+    ["ctx-copy", "Copy Path", () => void copyPath(path, false)],
+    ["ctx-copy-rel", "Copy Relative Path", () => void copyPath(path, true)],
+  ];
+  ctxActions = Object.fromEntries(items.flatMap(([id, , f]) => (f ? [[id, f]] : [])));
+  void Menu.new({
+    items: items
+      .filter(([, , f]) => f)
+      .map(([id, text, , enabled]) => ({ id, text, enabled: enabled ?? true })),
   }).then((m) => m.popup());
+};
 
 function showJupyterLog() {
   const log = conn && jupyter.log(conn.host, conn.root);
@@ -340,6 +347,7 @@ $("toggle-sidebar").addEventListener("click", toggleSidebar);
 
 // Menu items, so their shortcuts work wherever the keyboard is.
 void api.onMenu((id) => {
+  if (id.startsWith("ctx-")) return ctxActions[id]?.();
   if (document.querySelector("dialog[open]")) return;
   if (id === "install-cli") return void installCli();
   if (!conn) return;
