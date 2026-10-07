@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build the static Linux agents, and on a Mac this Mac's own agent for local
-# folders, and put them where the app bundles them.
+# Build the static Linux agents, and on a Mac both Mac agents (local folders, and
+# Mac remotes), and put them where the app bundles them.
 # Works on macOS and Linux: Rust ships the musl libc and the linker.
 set -eu
 cd "$(dirname "$0")/.."
@@ -12,9 +12,11 @@ for arch in x86_64 aarch64; do
   cp "target/$target/release/yonder-agent" "$out/yonder-agent-$arch-linux"
 done
 if [ "$(uname -s)" = Darwin ]; then
-  arch=$(uname -m | sed s/arm64/aarch64/)
-  target="$arch-apple-darwin"
-  cargo build --release -p yonder-agent --target "$target"
-  cp "target/$target/release/yonder-agent" "$out/yonder-agent-$arch-macos"
+  for arch in aarch64 x86_64; do
+    target="$arch-apple-darwin"
+    rustup target add "$target"
+    cargo build --release -p yonder-agent --target "$target"
+    cp "target/$target/release/yonder-agent" "$out/yonder-agent-$arch-macos"
+  done
 fi
 ls -l "$out"

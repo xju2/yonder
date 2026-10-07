@@ -77,18 +77,25 @@ impl std::error::Error for ConnectError {}
 /// The value comes from the remote, so only these are ever used in a path.
 pub const SUPPORTED_ARCHES: &[&str] = &["x86_64", "aarch64"];
 
-/// Look for the agent build for `arch` (as printed by `uname -m`) in `dirs`.
-/// Accepts both the packaged name `yonder-agent-<arch>-linux` and a Cargo
-/// target directory layout, `<arch>-unknown-linux-musl/release/yonder-agent`.
-pub fn find_agent(dirs: &[PathBuf], arch: &str) -> Option<PathBuf> {
+/// Look for the agent build for `os` (`Linux` or `Darwin`, as printed by
+/// `uname -s`) and `arch` (as printed by `uname -m`) in `dirs`.
+/// Accepts both the packaged name `yonder-agent-<arch>-linux` (or `-macos`)
+/// and a Cargo target directory layout, such as
+/// `<arch>-unknown-linux-musl/release/yonder-agent`.
+pub fn find_agent(dirs: &[PathBuf], os: &str, arch: &str) -> Option<PathBuf> {
     if !SUPPORTED_ARCHES.contains(&arch) {
         return None;
     }
+    let (name, triple) = match os {
+        "Linux" => ("linux", "unknown-linux-musl"),
+        "Darwin" => ("macos", "apple-darwin"),
+        _ => return None,
+    };
     dirs.iter()
         .flat_map(|d| {
             [
-                d.join(format!("yonder-agent-{arch}-linux")),
-                d.join(format!("{arch}-unknown-linux-musl/release/yonder-agent")),
+                d.join(format!("yonder-agent-{arch}-{name}")),
+                d.join(format!("{arch}-{triple}/release/yonder-agent")),
             ]
         })
         .find(|p| p.is_file())
@@ -289,9 +296,9 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
         "arm64" => "aarch64".to_string(),
         a => a.to_string(),
     };
-    if os != "Linux" {
+    if os != "Linux" && os != "Darwin" {
         return Err(s
-            .fail(format!("the remote runs {os:?}; only Linux is supported"))
+            .fail(format!("the remote runs {os:?}; only Linux and macOS are supported"))
             .await);
     }
     if !SUPPORTED_ARCHES.contains(&arch.as_str()) {
@@ -304,9 +311,9 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
     }
 
     s.step(format!(
-        "Remote is Linux {arch}; looking for a matching agent"
+        "Remote is {os} {arch}; looking for a matching agent"
     ));
-    let Some(agent_path) = find_agent(&opts.agent_dirs, &arch) else {
+    let Some(agent_path) = find_agent(&opts.agent_dirs, &os, &arch) else {
         return Err(ConnectError {
             step: s.step.clone(),
             message: format!("this copy of Yonder has no agent built for {arch}"),
@@ -562,12 +569,16 @@ mod tests {
         std::fs::write(d.join("x86_64-unknown-linux-musl/release/yonder-agent"), "").unwrap();
         std::fs::write(d.join("yonder-agent-aarch64-linux"), "").unwrap();
         let dirs = vec![d.clone()];
-        assert!(find_agent(&dirs, "x86_64").is_some());
-        assert!(find_agent(&dirs, "aarch64").is_some());
-        assert!(find_agent(&dirs, "riscv64").is_none());
+        assert!(find_agent(&dirs, "Linux", "x86_64").is_some());
+        assert!(find_agent(&dirs, "Linux", "aarch64").is_some());
+        assert!(find_agent(&dirs, "Darwin", "aarch64").is_none());
+        std::fs::write(d.join("yonder-agent-aarch64-macos"), "").unwrap();
+        assert!(find_agent(&dirs, "Darwin", "aarch64").is_some());
+        assert!(find_agent(&dirs, "FreeBSD", "aarch64").is_none());
+        assert!(find_agent(&dirs, "Linux", "riscv64").is_none());
         // Remote-supplied values never become paths outside `dirs`.
-        assert!(find_agent(&dirs, "../x86_64").is_none());
-        assert!(find_agent(&dirs, "/etc/passwd").is_none());
+        assert!(find_agent(&dirs, "Linux", "../x86_64").is_none());
+        assert!(find_agent(&dirs, "Linux", "/etc/passwd").is_none());
         std::fs::remove_dir_all(d).unwrap();
     }
 }
