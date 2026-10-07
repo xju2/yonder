@@ -256,10 +256,20 @@ let compareBase: string | null = null;
 const pathMenu = (path: string, reload: (() => void) | null = null) =>
   void Menu.new({
     items: [
-      { text: "Select for Comparison", action: () => (compareBase = path) },
-      ...(compareBase && compareBase !== path
-        ? [{ text: "Compare with Selected", action: () => void editors.compare(compareBase!, path) }]
-        : []),
+      {
+        text: "Select for Comparison",
+        action: () => {
+          compareBase = path;
+          status(`Selected ${baseName(path)} for comparison.`);
+        },
+      },
+      {
+        text: compareBase ? `Compare with Selected (${baseName(compareBase)})` : "Compare with Selected",
+        enabled: !!compareBase && compareBase !== path,
+        action: () => {
+          if (compareBase) void editors.compare(compareBase, path);
+        },
+      },
       ...(reload ? [{ text: "Reload", action: reload }] : []),
       ...(/\.ipynb$/i.test(path) && conn ? [{ text: "Show Jupyter Log", action: showJupyterLog }] : []),
       { text: "Copy Path", action: () => void copyPath(path, false) },
