@@ -458,6 +458,51 @@ export class Editors {
     this.show(tab);
   }
 
+  /** Open a read-only comparison of two files; `b` is the right side. */
+  async compare(a: string, b: string) {
+    // The key's middle part is the left file, escaped to hold no colon.
+    const key = `diff:${encodeURIComponent(a)}:${b}`;
+    const name = `${baseName(a)} ↔ ${baseName(b)}`;
+    this.status(`Comparing ${name}…`);
+    const gen = this.generation;
+    let fa, fb;
+    try {
+      [fa, fb] = await Promise.all([readFile(a), readFile(b)]);
+    } catch (e) {
+      this.status("");
+      await tell(`Could not compare ${name}.`, asError(e).message);
+      return;
+    }
+    this.status("");
+    if (gen !== this.generation) return;
+    const lang = languageFor(b);
+    const raced = this.tabs.find((t) => t.path === key);
+    if (raced) {
+      this.setDiff(raced, name, lang, fa.text, fb.text);
+      return this.show(raced);
+    }
+    const tab: Tab = {
+      path: key,
+      model: null,
+      note: "",
+      hash: null,
+      savedVersion: 0,
+      view: null,
+      el: document.createElement("div"),
+      viewer: null,
+      version: null,
+      loading: null,
+      diff: null,
+      label: name,
+      preview: null,
+    };
+    this.setDiff(tab, name, lang, fa.text, fb.text);
+    this.buildTab(tab);
+    tab.el.title = `${a} ↔ ${b}`;
+    this.tabs.push(tab);
+    this.show(tab);
+  }
+
   /** Give a diff tab new contents; either side null means not text. */
   private setDiff(
     tab: Tab,

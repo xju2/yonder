@@ -251,9 +251,15 @@ async function copyPath(path: string | null, relative: boolean) {
   }
 }
 
+let compareBase: string | null = null;
+
 const pathMenu = (path: string, reload: (() => void) | null = null) =>
   void Menu.new({
     items: [
+      { text: "Select for Comparison", action: () => (compareBase = path) },
+      ...(compareBase && compareBase !== path
+        ? [{ text: "Compare with Selected", action: () => void editors.compare(compareBase!, path) }]
+        : []),
       ...(reload ? [{ text: "Reload", action: reload }] : []),
       ...(/\.ipynb$/i.test(path) && conn ? [{ text: "Show Jupyter Log", action: showJupyterLog }] : []),
       { text: "Copy Path", action: () => void copyPath(path, false) },
