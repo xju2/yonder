@@ -81,6 +81,9 @@ dialog. Cancel ends that login attempt.
 - **Split editor:** <kbd>Cmd</kbd>+<kbd>\\</kbd> shows the current file
   again beside itself; switch tabs to put another file on the left, or press
   it again to close the right side.
+- **Compare two files:** right-click one in the tree (or its tab) and choose
+  **Select for Comparison**, then right-click another and choose **Compare
+  with Selected**. The difference opens in a read-only tab.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
