@@ -46,6 +46,8 @@ async fn local_host_runs_the_agent_without_ssh() {
     assert_eq!(
         std::fs::read_dir(home.join(".cache/yonder"))
             .unwrap()
+            .flatten()
+            .filter(|e| e.file_name() != "bin")
             .count(),
         1
     );

@@ -62,7 +62,7 @@ fn logged(log: &Mutex<Vec<LogLine>>, pred: impl Fn(&LogLine) -> bool) -> bool {
 
 fn installed_agents(home: &Path) -> usize {
     std::fs::read_dir(home.join(".cache/yonder"))
-        .map(|d| d.count())
+        .map(|d| d.flatten().filter(|e| e.file_name() != "bin").count())
         .unwrap_or(0)
 }
 
