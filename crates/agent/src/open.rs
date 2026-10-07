@@ -53,7 +53,7 @@ fn send(path: &str) -> Result<(), String> {
         .flatten()
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
-    socks.sort_by(|a, b| b.0.cmp(&a.0));
+    socks.sort_by_key(|s| std::cmp::Reverse(s.0));
     for (_, sock) in socks {
         match UnixStream::connect(&sock) {
             Ok(mut s) => return writeln!(s, "{path}").map_err(|e| e.to_string()),
