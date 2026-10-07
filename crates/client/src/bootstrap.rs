@@ -298,7 +298,9 @@ pub async fn connect(opts: &ConnectOptions, log: LogFn) -> Result<Connection, Co
     };
     if os != "Linux" && os != "Darwin" {
         return Err(s
-            .fail(format!("the remote runs {os:?}; only Linux and macOS are supported"))
+            .fail(format!(
+                "the remote runs {os:?}; only Linux and macOS are supported"
+            ))
             .await);
     }
     if !SUPPORTED_ARCHES.contains(&arch.as_str()) {
