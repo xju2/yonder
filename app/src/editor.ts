@@ -77,24 +77,20 @@ function languageFor(path: string): string {
   return best;
 }
 
-/** Markdown preview styles; the preview's frame does not see the app's. */
-const PREVIEW_CSS = `
-:root { color-scheme: light dark; }
-body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  max-width: 820px; margin: 0 auto; padding: 16px 32px 48px; }
-pre, code { font: 12.5px "SF Mono", Menlo, Monaco, monospace; background: rgb(127 127 127 / 0.12); border-radius: 4px; }
-code { padding: 1px 4px; }
-pre { padding: 10px 12px; overflow: auto; }
-pre code { padding: 0; background: none; }
-img { max-width: 100%; }
-table { border-collapse: collapse; }
-th, td { border: 1px solid rgb(127 127 127 / 0.35); padding: 4px 10px; }
-blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgb(127 127 127 / 0.4); opacity: 0.85; }
-h1, h2 { border-bottom: 1px solid rgb(127 127 127 / 0.25); padding-bottom: 4px; }
-`;
+/** Drop what could run or navigate from rendered Markdown (the CSP blocks most of it anyway). */
+function sanitize(html: string): DocumentFragment {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("script,style,link,meta,iframe,object,embed,form,base").forEach((n) => n.remove());
+  doc.body.querySelectorAll("*").forEach((n) => {
+    for (const a of [...n.attributes]) {
+      if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name);
+    }
+  });
+  const frag = document.createDocumentFragment();
+  frag.append(...doc.body.childNodes);
+  return frag;
+}
 
-const escapeAttr = (t: string) =>
-  t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const isMarkdown = (path: string) => /\.(md|markdown|mdown|mkd)$/i.test(path);
 
 export const baseName = (path: string) => path.split("/").pop() || path;
@@ -131,7 +127,7 @@ interface Tab {
   /** Tab title when it is not the file name. */
   label: string | null;
   /** Rendered Markdown, shown instead of the text while set. */
-  preview: HTMLIFrameElement | null;
+  preview: HTMLElement | null;
 }
 
 const TEXT_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
@@ -721,40 +717,41 @@ export class Editors {
     if (tab.preview) {
       tab.preview = null;
     } else {
-      const frame = document.createElement("iframe");
+      const frame = document.createElement("div");
       frame.className = "md-preview";
-      // No scripts, so a remote file's HTML cannot run or reach the app's
-      // commands. Same-origin only so that we can listen for double clicks.
-      frame.sandbox.value = "allow-same-origin";
       // Each top-level block carries its first source line, for double click.
       const tokens = marked.lexer(tab.model.getValue());
       let line = 1;
-      const html = tokens
-        .map((t) => {
-          const at = line;
-          line += t.raw.split("\n").length - 1;
-          const body = marked.parser(Object.assign([t], { links: tokens.links }));
-          return `<div data-line="${at}" data-raw="${escapeAttr(t.raw)}" style="display:contents">${body}</div>`;
-        })
-        .join("");
-      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>${PREVIEW_CSS}</style>${html}`;
-      frame.onload = () =>
-        frame.contentDocument?.addEventListener("dblclick", (e) => {
-          const block = (e.target as Element).closest?.("[data-line]") as HTMLElement | null;
-          if (!block || !tab.model) return;
-          const raw = block.dataset.raw ?? "";
-          const word = frame.contentWindow?.getSelection()?.toString().trim() ?? "";
-          const at = word ? raw.indexOf(word) : -1;
-          const before = raw.slice(0, Math.max(at, 0)).split("\n");
-          const lineNumber = Number(block.dataset.line) + before.length - 1;
-          const column = at < 0 ? 1 : before[before.length - 1].length + 1;
-          tab.preview = null;
-          this.show(tab);
-          const position = { lineNumber, column };
-          this.editor.setPosition(position);
-          this.editor.revealPositionInCenter(position);
-          this.editor.focus();
-        });
+      for (const t of tokens) {
+        const block = document.createElement("div");
+        block.style.display = "contents";
+        block.dataset.line = String(line);
+        block.dataset.raw = t.raw;
+        line += t.raw.split("\n").length - 1;
+        block.append(sanitize(marked.parser(Object.assign([t], { links: tokens.links }))));
+        frame.append(block);
+      }
+      // Links must not navigate the app.
+      frame.addEventListener("click", (e) => {
+        if ((e.target as Element).closest("a")) e.preventDefault();
+      });
+      frame.addEventListener("dblclick", (e) => {
+        const block = (e.target as Element).closest<HTMLElement>("[data-line]");
+        if (!block || !tab.model) return;
+        const raw = block.dataset.raw ?? "";
+        const word = String(getSelection() ?? "").trim();
+        const at = word ? raw.indexOf(word) : -1;
+        const before = raw.slice(0, Math.max(at, 0)).split("\n");
+        const position = {
+          lineNumber: Number(block.dataset.line) + before.length - 1,
+          column: at < 0 ? 1 : before[before.length - 1].length + 1,
+        };
+        tab.preview = null;
+        this.show(tab);
+        this.editor.setPosition(position);
+        this.editor.revealPositionInCenter(position);
+        this.editor.focus();
+      });
       tab.preview = frame;
     }
     this.show(tab);
@@ -820,7 +817,7 @@ export class Editors {
     tab.el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       // Reload would throw away unsaved edits, so those tabs don't offer it.
-      const frame = /\.ipynb$/i.test(tab.path) ? tab.preview : null;
+      const frame = /\.ipynb$/i.test(tab.path) ? (tab.preview as HTMLIFrameElement | null) : null;
       const reload = tab.viewer
         ? () => void this.refreshViewer(tab, true)
         : frame
