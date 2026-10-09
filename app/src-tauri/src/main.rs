@@ -1243,6 +1243,18 @@ fn main() {
             }
             _ => {}
         })
+        // The UI already held back a close with unsaved edits, so a window
+        // that is gone means quit; do not wait for the exit request to find
+        // the window list empty.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                let app = window.app_handle();
+                for (_, conn) in app.state::<AppState>().conns.lock().unwrap().drain() {
+                    conn.close();
+                }
+                app.exit(0);
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while starting Yonder")
         .run(|app, event| {

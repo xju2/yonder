@@ -93,6 +93,8 @@ blockquote { margin: 0; padding-left: 12px; border-left: 3px solid rgb(127 127 1
 h1, h2 { border-bottom: 1px solid rgb(127 127 127 / 0.25); padding-bottom: 4px; }
 `;
 
+const escapeAttr = (t: string) =>
+  t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const isMarkdown = (path: string) => /\.(md|markdown|mdown|mkd)$/i.test(path);
 
 export const baseName = (path: string) => path.split("/").pop() || path;
@@ -721,13 +723,38 @@ export class Editors {
     } else {
       const frame = document.createElement("iframe");
       frame.className = "md-preview";
-      // No scripts and an opaque origin: a remote file's HTML cannot reach
-      // the app's commands.
-      frame.sandbox.value = "";
-      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>${PREVIEW_CSS}</style>${marked.parse(
-        tab.model.getValue(),
-        { async: false },
-      )}`;
+      // No scripts, so a remote file's HTML cannot run or reach the app's
+      // commands. Same-origin only so that we can listen for double clicks.
+      frame.sandbox.value = "allow-same-origin";
+      // Each top-level block carries its first source line, for double click.
+      const tokens = marked.lexer(tab.model.getValue());
+      let line = 1;
+      const html = tokens
+        .map((t) => {
+          const at = line;
+          line += t.raw.split("\n").length - 1;
+          const body = marked.parser(Object.assign([t], { links: tokens.links }));
+          return `<div data-line="${at}" data-raw="${escapeAttr(t.raw)}" style="display:contents">${body}</div>`;
+        })
+        .join("");
+      frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>${PREVIEW_CSS}</style>${html}`;
+      frame.onload = () =>
+        frame.contentDocument?.addEventListener("dblclick", (e) => {
+          const block = (e.target as Element).closest?.("[data-line]") as HTMLElement | null;
+          if (!block || !tab.model) return;
+          const raw = block.dataset.raw ?? "";
+          const word = frame.contentWindow?.getSelection()?.toString().trim() ?? "";
+          const at = word ? raw.indexOf(word) : -1;
+          const before = raw.slice(0, Math.max(at, 0)).split("\n");
+          const lineNumber = Number(block.dataset.line) + before.length - 1;
+          const column = at < 0 ? 1 : before[before.length - 1].length + 1;
+          tab.preview = null;
+          this.show(tab);
+          const position = { lineNumber, column };
+          this.editor.setPosition(position);
+          this.editor.revealPositionInCenter(position);
+          this.editor.focus();
+        });
       tab.preview = frame;
     }
     this.show(tab);
