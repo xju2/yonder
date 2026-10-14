@@ -1119,6 +1119,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+Shift+N")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("close-workspace", "Close Workspace")
+                .accelerator("CmdOrCtrl+Shift+W")
+                .build(app)?,
+        )
         .separator()
         .item(
             &MenuItemBuilder::with_id("go-to-file", "Go to File…")
@@ -1234,7 +1239,7 @@ fn main() {
             "quit" if request_quit(app) => app.exit(0),
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
             | "toggle-sidebar" | "markdown-preview" | "split-editor" | "switch-workspace"
-            | "new-workspace" | "find-in-folder" | "install-cli") => {
+            | "new-workspace" | "close-workspace" | "find-in-folder" | "install-cli") => {
                 let _ = app.emit("menu", id);
             }
             // The right-click menus in the UI: their own actions never fire.

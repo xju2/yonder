@@ -352,6 +352,7 @@ void api.onMenu((id) => {
   if (id === "install-cli") return void installCli();
   if (!conn) return;
   if (id === "new-workspace") return showConnect();
+  if (id === "close-workspace") return void closeWorkspace();
   if (workspace.hidden) return;
   if (id === "go-to-file") finder.open();
   else if (id === "switch-workspace") pickWorkspace();
@@ -525,6 +526,45 @@ function pickWorkspace() {
   });
 }
 
+/**
+ * Close Workspace (⇧⌘W): drop the open workspace's tabs, terminals and saved
+ * tabs, forget it in the recent list, and open the next recent one.
+ * Its Jupyter, if any, runs until the connection ends.
+ */
+async function closeWorkspace() {
+  if (!wsKey || connecting) return;
+  const unsaved = editors.hasUnsavedHere();
+  const choice = await ask(
+    `Close ${target.host}:${target.folder || "~"}?`,
+    [
+      { value: "cancel", label: unsaved ? "Keep editing" : "Cancel", primary: true },
+      { value: "close", label: unsaved ? "Close without saving" : "Close", danger: unsaved },
+    ],
+    unsaved ? "Some files have unsaved changes. Terminals will be closed." : "Terminals will be closed.",
+  );
+  if (choice !== "close" || !wsKey) return;
+  const gone = target;
+  const { [wsKey]: _, ...tabs } = loadTabs();
+  // Null first: closing tabs must not save an empty list over the old one.
+  wsKey = null;
+  editors.closeAll();
+  terminals.closeAll();
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify(tabs));
+    localStorage.setItem(
+      RECENT_KEY,
+      JSON.stringify(loadRecent().filter((r) => r.host !== gone.host || r.folder !== gone.folder)),
+    );
+  } catch {
+    /* storage unavailable */
+  }
+  const next = loadRecent()[0];
+  if (!next || !(await openWorkspace(next.host, next.folder))) {
+    showConnect();
+    $("connect-cancel").hidden = true;
+  }
+}
+
 /** New Workspace (⇧⌘N): the connect screen, with a way back. */
 function showConnect() {
   connectView.hidden = false;
@@ -540,7 +580,7 @@ function showConnect() {
 }
 
 function hideConnect() {
-  if (!conn || connecting) return;
+  if (!conn || !wsKey || connecting) return;
   connectView.hidden = true;
   workspace.hidden = false;
 }

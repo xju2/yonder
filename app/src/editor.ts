@@ -189,6 +189,24 @@ export class Editors {
     return all.some((t) => this.isDirty(t));
   }
 
+  hasUnsavedHere(): boolean {
+    return this.tabs.some((t) => this.isDirty(t));
+  }
+
+  /** Drop this workspace's tabs, unsaved edits included; the caller has asked. */
+  closeAll() {
+    this.generation++;
+    this.unsplit();
+    for (const t of this.tabs) {
+      t.el.remove();
+      t.model?.dispose();
+      t.viewer?.dispose();
+      this.dropDiff(t);
+    }
+    this.tabs = [];
+    this.show(null);
+  }
+
   /**
    * Put away this workspace's tabs and bring back those of workspace `key`.
    * False if it had none put away: it was not open in this session.

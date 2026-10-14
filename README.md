@@ -47,6 +47,10 @@ dialog. Cancel ends that login attempt.
   when you come back, and each host's connection stays open, so switching
   needs no new login. A workspace's open files are remembered across
   restarts and reopen the first time you switch to it.
+  <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> closes the current one: its tabs
+  (unsaved edits too, after asking) and terminals go, it leaves the recent
+  list, and the next recent workspace opens. Its Jupyter keeps running until
+  the connection ends.
 - **Search:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> or the sidebar's
   **Search** tab finds text in every file of the folder (with match case,
   whole word and regular expression toggles; ⋯ adds files to include and

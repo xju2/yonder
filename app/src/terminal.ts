@@ -246,6 +246,11 @@ export class TerminalPanel {
   }
 
   /** Close the active terminal if it has the keyboard; false otherwise. */
+  /** Hang up and close every terminal of the workspace showing. */
+  closeAll() {
+    for (const t of this.mine()) this.close(t);
+  }
+
   closeFocused(): boolean {
     if (!this.active || !this.panel.contains(document.activeElement)) return false;
     this.close(this.active);
