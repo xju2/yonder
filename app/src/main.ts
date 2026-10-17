@@ -52,7 +52,7 @@ function loadRecent(): Recent[] {
 function saveRecent(r: Recent) {
   const list = [r, ...loadRecent().filter((x) => x.host !== r.host || x.folder !== r.folder)];
   try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 50)));
   } catch {
     /* storage unavailable */
   }
@@ -73,7 +73,9 @@ async function paintHosts() {
 
 function paintRecent() {
   const box = $("recent");
-  const list = loadRecent();
+  const all = loadRecent();
+  const typed = hostInput.value.trim();
+  const list = all.filter((r) => r.host.startsWith(typed)).slice(0, 5);
   box.replaceChildren(
     ...list.map((r) => {
       const b = document.createElement("button");
@@ -88,8 +90,9 @@ function paintRecent() {
       return b;
     }),
   );
-  if (list.length === 0) hostInput.focus();
+  if (all.length === 0) hostInput.focus();
 }
+hostInput.addEventListener("input", paintRecent);
 
 // ---- connection log and status
 
