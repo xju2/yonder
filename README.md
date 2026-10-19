@@ -88,6 +88,8 @@ dialog. Cancel ends that login attempt.
 - **Compare two files:** right-click one in the tree (or its tab) and choose
   **Select for Comparison**, then right-click another and choose **Compare
   with Selected**. The difference opens in a read-only tab.
+- **New file:** right-click a folder (or a file, for its folder) and choose
+  **New File…**; it is created empty and opened.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,

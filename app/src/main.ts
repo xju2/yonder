@@ -9,7 +9,7 @@ import { Languages } from "./lsp";
 import { ask, askText, tell } from "./modal";
 import { SearchPanel } from "./search";
 import { TerminalPanel } from "./terminal";
-import { FileTree } from "./tree";
+import { FileTree, joinPath } from "./tree";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -258,6 +258,22 @@ let compareBase: string | null = null;
 /** What the right-click menu's items do; they come back as "ctx-*" menu events. */
 let ctxActions: Record<string, () => void> = {};
 
+/** Create an empty file named by the user in `path` (a folder) or beside it (a file), then open it. */
+async function newFile(path: string) {
+  const dir = await api.listDir(path).then(() => path, () => path.replace(/\/[^/]*$/, "") || "/");
+  const name = (await askText("New file name", false, dir))?.trim();
+  if (!name) return;
+  const target = joinPath(dir, name);
+  try {
+    if (await api.stat(target).then(() => true, () => false)) throw new Error(`${name} already exists.`);
+    await api.writeFile(target, "", null);
+    refreshTree();
+    await editors.open(target);
+  } catch (e) {
+    status(`Could not create ${name}: ${api.asError(e).message}`);
+  }
+}
+
 const pathMenu = (path: string, reload: (() => void) | null = null) => {
   const items: [string, string, (() => void) | null, boolean?][] = [
     [
@@ -276,6 +292,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ],
     ["ctx-reload", "Reload", reload],
     ["ctx-jupyter", "Show Jupyter Log", /\.ipynb$/i.test(path) && conn ? showJupyterLog : null],
+    ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
     ["ctx-copy", "Copy Path", () => void copyPath(path, false)],
     ["ctx-copy-rel", "Copy Relative Path", () => void copyPath(path, true)],
   ];
