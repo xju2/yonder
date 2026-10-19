@@ -676,6 +676,10 @@ export class Editors {
   async save(tab = this.active) {
     if (!tab?.model) return;
     const model = tab.model;
+    // Format JSON first (an undoable edit); text with syntax errors is left as it is.
+    if (/\.json$/i.test(tab.path) && this.editor.getModel() === model) {
+      await this.editor.getAction("editor.action.formatDocument")?.run();
+    }
     const text = model.getValue();
     const version = model.getAlternativeVersionId();
     const name = baseName(tab.path);

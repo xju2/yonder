@@ -35,6 +35,7 @@ dialog. Cancel ends that login attempt.
 - **Save:** <kbd>Cmd</kbd>+<kbd>S</kbd>. If the file changed on the remote
   since you opened it (a batch job rewrote it, say), Yonder asks before
   overwriting.
+  `.json` files are formatted as they are saved.
 - **Files changed elsewhere:** when you come back to the window or switch
   tabs, an open file that a job or `git pull` rewrote is reloaded. If it has
   no unsaved edits, the new text replaces it and <kbd>Cmd</kbd>+<kbd>Z</kbd>
