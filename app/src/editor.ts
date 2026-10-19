@@ -144,6 +144,24 @@ const TEXT_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   parameterHints: { enabled: false },
 };
 
+/** Cmd+= / Cmd+- / Cmd+0 make the text of every editor larger, smaller or normal; remembered across restarts. */
+function trackFontZoom() {
+  try {
+    monaco.editor.EditorZoom.setZoomLevel(Number(localStorage.getItem("yonder.zoom")) || 0);
+  } catch {}
+  document.addEventListener("keydown", (e) => {
+    if (!e.metaKey || e.altKey || !(e.target as HTMLElement).closest?.(".monaco-editor")) return;
+    const step = { "=": 1, "+": 1, "-": -1, "0": 0 }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    const level = step === 0 ? 0 : monaco.editor.EditorZoom.getZoomLevel() + step;
+    monaco.editor.EditorZoom.setZoomLevel(level);
+    try {
+      localStorage.setItem("yonder.zoom", String(monaco.editor.EditorZoom.getZoomLevel()));
+    } catch {}
+  });
+}
+
 export class Editors {
   private tabs: Tab[] = [];
   private active: Tab | null = null;
@@ -178,6 +196,7 @@ export class Editors {
     // Monaco measures characters once; measure again once the font is in.
     void document.fonts.load('13px "IBM Plex Mono"').then(() => monaco.editor.remeasureFonts());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save());
+    trackFontZoom();
     this.editor.onDidChangeCursorPosition((e) =>
       this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`),
     );
