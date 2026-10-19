@@ -1152,6 +1152,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+W")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("reopen-tab", "Reopen Closed Tab")
+                .accelerator("CmdOrCtrl+Shift+T")
+                .build(app)?,
+        )
         .build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .undo()

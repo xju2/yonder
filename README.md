@@ -94,6 +94,8 @@ dialog. Cancel ends that login attempt.
   editor's text, <kbd>Cmd</kbd>+<kbd>0</kbd> resets it; the size is remembered.
 - **Word wrap:** <kbd>Alt</kbd>+<kbd>Z</kbd> (View menu) wraps long lines; the
   choice is remembered.
+- **Reopen Closed Tab:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> brings back the
+  most recently closed file, and again for the one before.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,

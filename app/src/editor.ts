@@ -173,6 +173,7 @@ function trackFontZoom() {
 
 export class Editors {
   private tabs: Tab[] = [];
+  private closed: string[] = [];
   private active: Tab | null = null;
   /** Tabs of the other workspaces, unsaved edits included, by workspace. */
   private kept = new Map<string, { tabs: Tab[]; active: Tab | null }>();
@@ -747,6 +748,7 @@ export class Editors {
       }
     }
     if (this.side?.tab === tab) this.unsplit();
+    if (!tab.diff) this.closed.push(tab.path);
     const i = this.tabs.indexOf(tab);
     this.tabs.splice(i, 1);
     tab.el.remove();
@@ -837,6 +839,12 @@ export class Editors {
     this.side?.editor.dispose();
     this.side?.el.remove();
     this.side = null;
+  }
+
+  /** File > Reopen Closed Tab: the most recently closed file, most recent first. */
+  reopenClosed() {
+    const path = this.closed.pop();
+    if (path) void this.open(path);
   }
 
   closeActive() {
