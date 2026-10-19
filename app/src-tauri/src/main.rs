@@ -1148,6 +1148,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )
         .separator()
         .item(
+            &MenuItemBuilder::with_id("save-all", "Save All")
+                .accelerator("CmdOrCtrl+Alt+S")
+                .build(app)?,
+        )
+        .item(
             &MenuItemBuilder::with_id("close-tab", "Close Tab")
                 .accelerator("CmdOrCtrl+W")
                 .build(app)?,

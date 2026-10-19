@@ -36,6 +36,7 @@ dialog. Cancel ends that login attempt.
   since you opened it (a batch job rewrote it, say), Yonder asks before
   overwriting.
   `.json` files are formatted as they are saved.
+- **Save all:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> saves every tab with unsaved edits.
 - **Files changed elsewhere:** when you come back to the window or switch
   tabs, an open file that a job or `git pull` rewrote is reloaded. If it has
   no unsaved edits, the new text replaces it and <kbd>Cmd</kbd>+<kbd>Z</kbd>

@@ -845,6 +845,11 @@ export class Editors {
     this.side = null;
   }
 
+  /** File > Save All: every tab with unsaved edits, one after another (a conflict asks, as for one file). */
+  async saveAll() {
+    for (const tab of [...this.tabs]) if (this.isDirty(tab)) await this.save(tab);
+  }
+
   /** File > Reopen Closed Tab: the most recently closed file, most recent first. */
   reopenClosed() {
     const path = this.closed.pop();
