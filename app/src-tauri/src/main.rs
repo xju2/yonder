@@ -1178,6 +1178,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .accelerator("CmdOrCtrl+Backslash")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("toggle-wrap", "Toggle Word Wrap")
+                .accelerator("Alt+Z")
+                .build(app)?,
+        )
         .build()?;
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()

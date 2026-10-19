@@ -142,7 +142,16 @@ const TEXT_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
   quickSuggestions: false,
   wordBasedSuggestions: "off",
   parameterHints: { enabled: false },
+  wordWrap: storedWrap(),
 };
+
+function storedWrap(): "on" | "off" {
+  try {
+    return localStorage.getItem("yonder.wrap") === "on" ? "on" : "off";
+  } catch {
+    return "off";
+  }
+}
 
 /** Cmd+= / Cmd+- / Cmd+0 make the text of every editor larger, smaller or normal; remembered across restarts. */
 function trackFontZoom() {
@@ -798,6 +807,15 @@ export class Editors {
    * Show the active text file in a second editor beside the first, or close
    * that one. It shares the file's model, so edits, undo and saving are one.
    */
+  /** View > Toggle Word Wrap: every editor, remembered across restarts. */
+  toggleWrap() {
+    TEXT_OPTIONS.wordWrap = TEXT_OPTIONS.wordWrap === "on" ? "off" : "on";
+    for (const e of monaco.editor.getEditors()) e.updateOptions({ wordWrap: TEXT_OPTIONS.wordWrap });
+    try {
+      localStorage.setItem("yonder.wrap", TEXT_OPTIONS.wordWrap);
+    } catch {}
+  }
+
   toggleSplit() {
     if (this.side) return this.unsplit();
     const tab = this.active;
