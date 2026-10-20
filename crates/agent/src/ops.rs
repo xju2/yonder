@@ -25,6 +25,7 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
             expected_hash,
         } => write_file(Path::new(&path), &data, expected_hash),
         Op::Rename { from, to } => rename(Path::new(&from), Path::new(&to)),
+        Op::MakeDir { path } => make_dir(Path::new(&path)),
         Op::Git {
             cwd,
             args,
@@ -47,6 +48,17 @@ fn rename(from: &Path, to: &Path) -> Result<Reply, Error> {
         ));
     }
     fs::rename(from, to)?;
+    Ok(Reply::Done)
+}
+
+fn make_dir(path: &Path) -> Result<Reply, Error> {
+    if path.symlink_metadata().is_ok() {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("{} already exists", path.display()),
+        ));
+    }
+    fs::create_dir_all(path)?;
     Ok(Reply::Done)
 }
 
@@ -515,6 +527,18 @@ mod tests {
             handle(op(at("a"), at("d"))).unwrap_err().kind,
             ErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn make_dir_creates_parents_but_not_over_something() {
+        let d = tempfile::tempdir().unwrap();
+        let at = |n: &str| d.path().join(n).to_string_lossy().into_owned();
+        let op = |path| Op::MakeDir { path };
+        assert_eq!(handle(op(at("a/b"))).unwrap(), Reply::Done);
+        assert!(d.path().join("a/b").is_dir());
+        assert!(handle(op(at("a/b"))).is_err());
+        fs::write(at("f"), "").unwrap();
+        assert!(handle(op(at("f"))).is_err());
     }
 
     #[test]

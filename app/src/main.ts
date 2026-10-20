@@ -274,6 +274,19 @@ async function newFile(path: string) {
   }
 }
 
+/** Create a folder named by the user in `path` (a folder) or beside it (a file). */
+async function newFolder(path: string) {
+  const dir = await api.listDir(path).then(() => path, () => path.replace(/\/[^/]*$/, "") || "/");
+  const name = (await askText("New folder name", false, dir))?.trim();
+  if (!name) return;
+  try {
+    await api.makeDir(joinPath(dir, name));
+    refreshTree();
+  } catch (e) {
+    status(`Could not create ${name}: ${api.asError(e).message}`);
+  }
+}
+
 /** Rename a file or folder in place. Its open tabs are closed first, so none is left saving to the old name. */
 async function renamePath(path: string) {
   const name = (await askText("Rename to", false, path))?.trim();
@@ -307,6 +320,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ["ctx-reload", "Reload", reload],
     ["ctx-jupyter", "Show Jupyter Log", /\.ipynb$/i.test(path) && conn ? showJupyterLog : null],
     ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
+    ["ctx-new-folder", "New Folder…", conn ? () => void newFolder(path) : null],
     ["ctx-rename", "Rename…", conn && path !== conn.root ? () => void renamePath(path) : null],
     ["ctx-copy", "Copy Path", () => void copyPath(path, false)],
     ["ctx-copy-rel", "Copy Relative Path", () => void copyPath(path, true)],

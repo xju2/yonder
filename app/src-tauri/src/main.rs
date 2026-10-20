@@ -547,6 +547,14 @@ async fn rename(
     }
 }
 
+#[tauri::command]
+async fn make_dir(state: State<'_, AppState>, conn: u64, path: String) -> Result<(), CmdError> {
+    match state.get(conn)?.call(Op::MakeDir { path }).await? {
+        Reply::Done => Ok(()),
+        other => Err(unexpected(other)),
+    }
+}
+
 #[derive(Serialize)]
 struct PtyOpened {
     pty: u64,
@@ -1251,6 +1259,7 @@ fn main() {
             read_bytes,
             stat,
             rename,
+            make_dir,
             write_file,
             pty_open,
             pty_write,
