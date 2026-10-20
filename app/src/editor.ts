@@ -845,6 +845,14 @@ export class Editors {
     this.side = null;
   }
 
+  /** File > Close All Tabs: asks about unsaved edits file by file; Cancel keeps that tab and stops. */
+  async closeAllTabs() {
+    for (const tab of [...this.tabs]) {
+      await this.close(tab);
+      if (this.tabs.includes(tab)) return;
+    }
+  }
+
   /** View > Next Tab / Previous Tab, wrapping around. */
   stepTab(by: 1 | -1) {
     const i = this.active ? this.tabs.indexOf(this.active) : -1;

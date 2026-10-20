@@ -36,6 +36,7 @@ dialog. Cancel ends that login attempt.
   since you opened it (a batch job rewrote it, say), Yonder asks before
   overwriting.
   `.json` files are formatted as they are saved.
+- **Close all tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>; it asks about unsaved edits.
 - **Switch tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>→</kbd> (View menu).
 - **Save all:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> saves every tab with unsaved edits.
 - **Files changed elsewhere:** when you come back to the window or switch

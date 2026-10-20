@@ -384,6 +384,7 @@ void api.onMenu((id) => {
   else if (id === "toggle-sidebar") toggleSidebar();
   else if (id === "markdown-preview") editors.togglePreview();
   else if (id === "split-editor") editors.toggleSplit();
+  else if (id === "close-all-tabs") void editors.closeAllTabs();
   else if (id === "next-tab") editors.stepTab(1);
   else if (id === "prev-tab") editors.stepTab(-1);
   else if (id === "save-all") void editors.saveAll();
