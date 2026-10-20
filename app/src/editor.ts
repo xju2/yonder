@@ -853,6 +853,16 @@ export class Editors {
     }
   }
 
+  /** Close the tabs of `path` and of files under it, asking about unsaved edits; false if one stays open. */
+  async closeUnder(path: string) {
+    for (const tab of [...this.tabs]) {
+      if (tab.path !== path && !tab.path.startsWith(path + "/")) continue;
+      await this.close(tab);
+      if (this.tabs.includes(tab)) return false;
+    }
+    return true;
+  }
+
   /** View > Next Tab / Previous Tab, wrapping around. */
   stepTab(by: 1 | -1) {
     const i = this.active ? this.tabs.indexOf(this.active) : -1;

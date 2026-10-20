@@ -83,6 +83,8 @@ export interface Stat {
 }
 export const stat = (path: string) => invoke<Stat>("stat", { conn, path });
 
+export const rename = (from: string, to: string) => invoke<void>("rename", { conn, from, to });
+
 export const writeFile = (path: string, text: string, expectedHash: string | null) =>
   invoke<Written>("write_file", { conn, path, text, expectedHash });
 

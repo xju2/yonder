@@ -274,6 +274,20 @@ async function newFile(path: string) {
   }
 }
 
+/** Rename a file or folder in place. Its open tabs are closed first, so none is left saving to the old name. */
+async function renamePath(path: string) {
+  const name = (await askText("Rename to", false, path))?.trim();
+  if (!name || name === baseName(path)) return;
+  const to = name.startsWith("/") ? name : joinPath(path.replace(/\/[^/]*$/, "") || "/", name);
+  if (!(await editors.closeUnder(path))) return;
+  try {
+    await api.rename(path, to);
+    refreshTree();
+  } catch (e) {
+    status(`Could not rename ${baseName(path)}: ${api.asError(e).message}`);
+  }
+}
+
 const pathMenu = (path: string, reload: (() => void) | null = null) => {
   const items: [string, string, (() => void) | null, boolean?][] = [
     [
@@ -293,6 +307,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ["ctx-reload", "Reload", reload],
     ["ctx-jupyter", "Show Jupyter Log", /\.ipynb$/i.test(path) && conn ? showJupyterLog : null],
     ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
+    ["ctx-rename", "Rename…", conn && path !== conn.root ? () => void renamePath(path) : null],
     ["ctx-copy", "Copy Path", () => void copyPath(path, false)],
     ["ctx-copy-rel", "Copy Relative Path", () => void copyPath(path, true)],
   ];

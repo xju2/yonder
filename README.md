@@ -101,6 +101,8 @@ dialog. Cancel ends that login attempt.
   choice is remembered.
 - **Reopen Closed Tab:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> brings back the
   most recently closed file, and again for the one before.
+- **Rename:** right-click a file or folder and choose **Rename…**. Its open tabs
+  close first (asking about unsaved edits); an existing name is never replaced.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,

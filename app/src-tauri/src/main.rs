@@ -534,6 +534,19 @@ async fn stat(state: State<'_, AppState>, conn: u64, path: String) -> Result<Sta
     }
 }
 
+#[tauri::command]
+async fn rename(
+    state: State<'_, AppState>,
+    conn: u64,
+    from: String,
+    to: String,
+) -> Result<(), CmdError> {
+    match state.get(conn)?.call(Op::Rename { from, to }).await? {
+        Reply::Done => Ok(()),
+        other => Err(unexpected(other)),
+    }
+}
+
 #[derive(Serialize)]
 struct PtyOpened {
     pty: u64,
@@ -1237,6 +1250,7 @@ fn main() {
             read_file,
             read_bytes,
             stat,
+            rename,
             write_file,
             pty_open,
             pty_write,
@@ -1270,7 +1284,8 @@ fn main() {
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
             | "toggle-sidebar" | "markdown-preview" | "split-editor" | "switch-workspace"
             | "new-workspace" | "close-workspace" | "find-in-folder" | "install-cli"
-            | "toggle-wrap" | "close-all-tabs" | "reopen-tab" | "save-all" | "next-tab" | "prev-tab") => {
+            | "toggle-wrap" | "close-all-tabs" | "reopen-tab" | "save-all" | "next-tab"
+            | "prev-tab") => {
                 let _ = app.emit("menu", id);
             }
             // The right-click menus in the UI: their own actions never fire.

@@ -24,6 +24,7 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
             data,
             expected_hash,
         } => write_file(Path::new(&path), &data, expected_hash),
+        Op::Rename { from, to } => rename(Path::new(&from), Path::new(&to)),
         Op::Git {
             cwd,
             args,
@@ -34,6 +35,19 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
             format!("not a file request: {other:?}"),
         )),
     }
+}
+
+/// `fs::rename` replaces an existing file silently; refuse that here. A
+/// check then rename can lose a race, which is acceptable for a person typing a name.
+fn rename(from: &Path, to: &Path) -> Result<Reply, Error> {
+    if to.symlink_metadata().is_ok() {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("{} already exists", to.display()),
+        ));
+    }
+    fs::rename(from, to)?;
+    Ok(Reply::Done)
 }
 
 fn home() -> String {
@@ -484,6 +498,23 @@ mod tests {
             path: d.path().join("nope").to_string_lossy().into(),
         };
         assert_eq!(handle(op).unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn rename_moves_but_never_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        let at = |n: &str| d.path().join(n).to_string_lossy().into_owned();
+        fs::write(at("a"), "A").unwrap();
+        fs::write(at("b"), "B").unwrap();
+        let op = |from, to| Op::Rename { from, to };
+        assert!(handle(op(at("a"), at("b"))).is_err());
+        assert_eq!(fs::read_to_string(at("b")).unwrap(), "B");
+        assert_eq!(handle(op(at("a"), at("c"))).unwrap(), Reply::Done);
+        assert_eq!(fs::read_to_string(at("c")).unwrap(), "A");
+        assert_eq!(
+            handle(op(at("a"), at("d"))).unwrap_err().kind,
+            ErrorKind::NotFound
+        );
     }
 
     #[test]

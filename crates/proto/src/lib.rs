@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -67,6 +67,11 @@ pub enum Op {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
         expected_hash: Option<u64>,
+    },
+    /// Move a file or folder. Fails, changing nothing, if `to` exists.
+    Rename {
+        from: String,
+        to: String,
     },
     /// Start the login shell on a new pseudo-terminal. Output arrives as
     /// [`Event::PtyOutput`]; the end as [`Event::PtyExit`].
