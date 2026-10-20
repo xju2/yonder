@@ -70,7 +70,7 @@ export class Picker {
   private loading = false;
   private matches: string[] = [];
   private selected = 0;
-  private onPick: (item: string) => void = () => {};
+  private onPick: (item: string, line?: number) => void = () => {};
   private run = 0;
 
   constructor() {
@@ -91,7 +91,7 @@ export class Picker {
   async open(
     label: string,
     items: string[],
-    onPick: (item: string) => void,
+    onPick: (item: string, line?: number) => void,
     fresh?: Promise<string[]>,
   ) {
     if (dialog.open) return;
@@ -118,8 +118,13 @@ export class Picker {
     if (dialog.open) this.filter();
   }
 
+  /** The typed text without a trailing `:LINE` (or `:LINE:COL`), as in `main.ts:120`. */
+  private query() {
+    return input.value.trim().replace(/:\d+(:\d+)?$/, "");
+  }
+
   private filter() {
-    const q = input.value.trim();
+    const q = this.query();
     this.matches = q
       ? this.items
           .map((f) => [score(q, f), f] as const)
@@ -167,7 +172,7 @@ export class Picker {
     const f = this.matches[i];
     if (!f) return;
     dialog.close();
-    this.onPick(f);
+    this.onPick(f, Number(/:(\d+)(:\d+)?$/.exec(input.value.trim())?.[1]) || undefined);
   }
 }
 
@@ -178,7 +183,7 @@ export class Finder {
   constructor(
     private picker: Picker,
     private root: () => string | null,
-    private onOpen: (path: string) => void,
+    private onOpen: (path: string, line?: number) => void,
   ) {}
 
   open() {
@@ -195,6 +200,6 @@ export class Finder {
         }
         return files;
       });
-    void this.picker.open("Go to file", this.files, (f) => this.onOpen(joinPath(root, f)), fresh);
+    void this.picker.open("Go to file", this.files, (f, line) => this.onOpen(joinPath(root, f), line), fresh);
   }
 }

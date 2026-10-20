@@ -354,7 +354,7 @@ const picker = new Picker();
 const finder = new Finder(
   picker,
   () => (conn && !workspace.hidden ? conn.root : null),
-  (path) => void editors.open(path),
+  (path, line) => void editors.open(path, line ? { line, column: 1, length: 0 } : undefined),
 );
 const search = new SearchPanel(
   $("search-view"),
