@@ -845,6 +845,12 @@ export class Editors {
     this.side = null;
   }
 
+  /** View > Next Tab / Previous Tab, wrapping around. */
+  stepTab(by: 1 | -1) {
+    const i = this.active ? this.tabs.indexOf(this.active) : -1;
+    if (i >= 0 && this.tabs.length > 1) this.show(this.tabs[(i + by + this.tabs.length) % this.tabs.length]);
+  }
+
   /** File > Save All: every tab with unsaved edits, one after another (a conflict asks, as for one file). */
   async saveAll() {
     for (const tab of [...this.tabs]) if (this.isDirty(tab)) await this.save(tab);
