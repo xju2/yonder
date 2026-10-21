@@ -287,6 +287,12 @@ async function newFolder(path: string) {
   }
 }
 
+/** Open a terminal in `path` (a folder) or in the folder of a file. */
+async function terminalHere(path: string) {
+  const dir = await api.listDir(path).then(() => path, () => path.replace(/\/[^/]*$/, "") || "/");
+  void terminals.create(dir);
+}
+
 /** Delete a file or folder for good (the remote has no trash), after asking. */
 async function deletePath(path: string) {
   const choice = await ask(`Delete ${baseName(path)}?`, [
@@ -335,6 +341,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ["ctx-reload", "Reload", reload],
     ["ctx-jupyter", "Show Jupyter Log", /\.ipynb$/i.test(path) && conn ? showJupyterLog : null],
     ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
+    ["ctx-terminal", "Open in Terminal", conn ? () => void terminalHere(path) : null],
     ["ctx-new-folder", "New Folder…", conn ? () => void newFolder(path) : null],
     ["ctx-rename", "Rename…", conn && path !== conn.root ? () => void renamePath(path) : null],
     ["ctx-delete", "Delete…", conn && path !== conn.root ? () => void deletePath(path) : null],

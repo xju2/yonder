@@ -101,6 +101,8 @@ dialog. Cancel ends that login attempt.
   choice is remembered.
 - **Reopen Closed Tab:** <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> brings back the
   most recently closed file, and again for the one before.
+- **Open in Terminal:** right-click a folder (or a file, for its folder) to start a
+  shell there.
 - **New folder:** right-click and choose **New Folder…** (missing parents are made too).
 - **Rename:** right-click a file or folder and choose **Rename…**. Its open tabs
   close first (asking about unsaved edits); an existing name is never replaced.

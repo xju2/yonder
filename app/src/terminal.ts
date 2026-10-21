@@ -120,7 +120,8 @@ export class TerminalPanel {
     this.sash.hidden = true;
   }
 
-  async create() {
+  /** A new shell, in `cwd` or else the open folder. */
+  async create(cwd: string | null = null) {
     const conn = this.conn();
     if (conn === null) return;
     this.panel.hidden = false;
@@ -176,7 +177,7 @@ export class TerminalPanel {
     const rows = term.rows;
     let opened: api.PtyOpened;
     try {
-      opened = await api.ptyOpen(conn, cols, rows, this.cwd(), output);
+      opened = await api.ptyOpen(conn, cols, rows, cwd ?? this.cwd(), output);
     } catch (e) {
       if (t.closed) return;
       const msg = api.asError(e).message;
