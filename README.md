@@ -108,6 +108,8 @@ dialog. Cancel ends that login attempt.
   close first (asking about unsaved edits); an existing name is never replaced.
 - **Delete:** right-click and choose **Delete…**; it asks first. Folders go with
   everything in them, and there is no trash to recover from.
+- **Reveal in File Tree:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> (View menu), the same as
+  double-clicking a tab.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
