@@ -104,6 +104,8 @@ dialog. Cancel ends that login attempt.
 - **New folder:** right-click and choose **New Folder…** (missing parents are made too).
 - **Rename:** right-click a file or folder and choose **Rename…**. Its open tabs
   close first (asking about unsaved edits); an existing name is never replaced.
+- **Delete:** right-click and choose **Delete…**; it asks first. Folders go with
+  everything in them, and there is no trash to recover from.
 - **Double-click a tab** to show its file in the tree.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,

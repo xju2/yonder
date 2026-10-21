@@ -287,6 +287,21 @@ async function newFolder(path: string) {
   }
 }
 
+/** Delete a file or folder for good (the remote has no trash), after asking. */
+async function deletePath(path: string) {
+  const choice = await ask(`Delete ${baseName(path)}?`, [
+    { value: "cancel", label: "Cancel", primary: true },
+    { value: "delete", label: "Delete", danger: true },
+  ], `${path} will be removed from the remote, with everything in it. This cannot be undone.`);
+  if (choice !== "delete" || !(await editors.closeUnder(path))) return;
+  try {
+    await api.remove(path);
+    refreshTree();
+  } catch (e) {
+    status(`Could not delete ${baseName(path)}: ${api.asError(e).message}`);
+  }
+}
+
 /** Rename a file or folder in place. Its open tabs are closed first, so none is left saving to the old name. */
 async function renamePath(path: string) {
   const name = (await askText("Rename to", false, path))?.trim();
@@ -322,6 +337,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
     ["ctx-new-folder", "New Folder…", conn ? () => void newFolder(path) : null],
     ["ctx-rename", "Rename…", conn && path !== conn.root ? () => void renamePath(path) : null],
+    ["ctx-delete", "Delete…", conn && path !== conn.root ? () => void deletePath(path) : null],
     ["ctx-copy", "Copy Path", () => void copyPath(path, false)],
     ["ctx-copy-rel", "Copy Relative Path", () => void copyPath(path, true)],
   ];

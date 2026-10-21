@@ -87,6 +87,8 @@ export const rename = (from: string, to: string) => invoke<void>("rename", { con
 
 export const makeDir = (path: string) => invoke<void>("make_dir", { conn, path });
 
+export const remove = (path: string) => invoke<void>("remove", { conn, path });
+
 export const writeFile = (path: string, text: string, expectedHash: string | null) =>
   invoke<Written>("write_file", { conn, path, text, expectedHash });
 

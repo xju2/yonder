@@ -26,6 +26,7 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
         } => write_file(Path::new(&path), &data, expected_hash),
         Op::Rename { from, to } => rename(Path::new(&from), Path::new(&to)),
         Op::MakeDir { path } => make_dir(Path::new(&path)),
+        Op::Remove { path } => remove(Path::new(&path)),
         Op::Git {
             cwd,
             args,
@@ -59,6 +60,16 @@ fn make_dir(path: &Path) -> Result<Reply, Error> {
         ));
     }
     fs::create_dir_all(path)?;
+    Ok(Reply::Done)
+}
+
+fn remove(path: &Path) -> Result<Reply, Error> {
+    // symlink_metadata: a link to a folder is removed as a link, never followed.
+    if path.symlink_metadata()?.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
     Ok(Reply::Done)
 }
 
@@ -539,6 +550,23 @@ mod tests {
         assert!(handle(op(at("a/b"))).is_err());
         fs::write(at("f"), "").unwrap();
         assert!(handle(op(at("f"))).is_err());
+    }
+
+    #[test]
+    fn remove_deletes_links_without_following_them() {
+        let d = tempfile::tempdir().unwrap();
+        let at = |n: &str| d.path().join(n);
+        let op = |n: &str| Op::Remove {
+            path: at(n).to_string_lossy().into(),
+        };
+        fs::create_dir_all(at("dir/sub")).unwrap();
+        fs::write(at("dir/sub/f"), "x").unwrap();
+        symlink(at("dir"), at("link")).unwrap();
+        assert_eq!(handle(op("link")).unwrap(), Reply::Done);
+        assert!(at("dir/sub/f").exists());
+        assert_eq!(handle(op("dir")).unwrap(), Reply::Done);
+        assert!(!at("dir").exists());
+        assert_eq!(handle(op("dir")).unwrap_err().kind, ErrorKind::NotFound);
     }
 
     #[test]

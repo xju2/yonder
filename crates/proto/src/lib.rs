@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -75,6 +75,11 @@ pub enum Op {
     },
     /// Create a folder, and any missing parents. Fails if `path` exists.
     MakeDir {
+        path: String,
+    },
+    /// Delete a file, a symbolic link (not what it points to), or a folder
+    /// with everything in it. There is no trash.
+    Remove {
         path: String,
     },
     /// Start the login shell on a new pseudo-terminal. Output arrives as
