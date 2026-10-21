@@ -1233,9 +1233,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .build(app)?,
         )
         .item(
-            &MenuItemBuilder::with_id("toggle-wrap", "Toggle Word Wrap")
-                .accelerator("Alt+Z")
-                .build(app)?,
+            // No accelerator: Option+Z types a character on macOS, so the editor
+            // handles the key itself (see trackFontZoom).
+            &MenuItemBuilder::with_id("toggle-wrap", "Toggle Word Wrap (⌥Z)").build(app)?,
         )
         .build()?;
     let window = SubmenuBuilder::new(app, "Window")

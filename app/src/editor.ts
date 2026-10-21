@@ -153,12 +153,28 @@ function storedWrap(): "on" | "off" {
   }
 }
 
+/** Word wrap for every editor, remembered across restarts. */
+function toggleWrap() {
+  TEXT_OPTIONS.wordWrap = TEXT_OPTIONS.wordWrap === "on" ? "off" : "on";
+  for (const e of monaco.editor.getEditors()) e.updateOptions({ wordWrap: TEXT_OPTIONS.wordWrap });
+  try {
+    localStorage.setItem("yonder.wrap", TEXT_OPTIONS.wordWrap);
+  } catch {}
+}
+
 /** Cmd+= / Cmd+- / Cmd+0 make the text of every editor larger, smaller or normal; remembered across restarts. */
 function trackFontZoom() {
   try {
     monaco.editor.EditorZoom.setZoomLevel(Number(localStorage.getItem("yonder.zoom")) || 0);
   } catch {}
   document.addEventListener("keydown", (e) => {
+    // Alt+Z: word wrap. Matched by code, since the key is "Ω" with Option held.
+    if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.code === "KeyZ") {
+      if (!(e.target as HTMLElement).closest?.(".monaco-editor")) return;
+      e.preventDefault();
+      toggleWrap();
+      return;
+    }
     if (!e.metaKey || e.altKey || !(e.target as HTMLElement).closest?.(".monaco-editor")) return;
     const step = { "=": 1, "+": 1, "-": -1, "0": 0 }[e.key];
     if (step === undefined) return;
@@ -813,14 +829,8 @@ export class Editors {
    * Show the active text file in a second editor beside the first, or close
    * that one. It shares the file's model, so edits, undo and saving are one.
    */
-  /** View > Toggle Word Wrap: every editor, remembered across restarts. */
-  toggleWrap() {
-    TEXT_OPTIONS.wordWrap = TEXT_OPTIONS.wordWrap === "on" ? "off" : "on";
-    for (const e of monaco.editor.getEditors()) e.updateOptions({ wordWrap: TEXT_OPTIONS.wordWrap });
-    try {
-      localStorage.setItem("yonder.wrap", TEXT_OPTIONS.wordWrap);
-    } catch {}
-  }
+  /** View > Toggle Word Wrap. */
+  toggleWrap = toggleWrap;
 
   toggleSplit() {
     if (this.side) return this.unsplit();
