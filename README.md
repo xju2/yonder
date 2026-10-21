@@ -37,6 +37,7 @@ dialog. Cancel ends that login attempt.
   overwriting.
   `.json` files are formatted as they are saved.
 - **Close all tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>; it asks about unsaved edits.
+- **Close other tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> keeps only the current tab.
 - **Switch tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>→</kbd> (View menu).
 - **Go to File:** <kbd>Cmd</kbd>+<kbd>P</kbd>; add `:LINE` (as in `main.rs:120`) to open the file there.
 - **Save all:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> saves every tab with unsaved edits.

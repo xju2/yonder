@@ -863,6 +863,16 @@ export class Editors {
     }
   }
 
+  /** File > Close Other Tabs: all but the active one; Cancel on an unsaved file stops. */
+  async closeOthers() {
+    const keep = this.active;
+    for (const tab of [...this.tabs]) {
+      if (tab === keep) continue;
+      await this.close(tab);
+      if (this.tabs.includes(tab)) return;
+    }
+  }
+
   /** Close the tabs of `path` and of files under it, asking about unsaved edits; false if one stays open. */
   async closeUnder(path: string) {
     for (const tab of [...this.tabs]) {
