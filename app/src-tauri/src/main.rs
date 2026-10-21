@@ -1233,6 +1233,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 .build(app)?,
         )
         .item(
+            &MenuItemBuilder::with_id("go-to-tab", "Go to Open Tab…")
+                .accelerator("CmdOrCtrl+Alt+P")
+                .build(app)?,
+        )
+        .item(
             &MenuItemBuilder::with_id("next-tab", "Next Tab")
                 .accelerator("CmdOrCtrl+Alt+Right")
                 .build(app)?,
@@ -1312,8 +1317,8 @@ fn main() {
             id @ ("go-to-file" | "copy-path" | "copy-relative-path" | "close-tab"
             | "toggle-sidebar" | "markdown-preview" | "split-editor" | "switch-workspace"
             | "new-workspace" | "close-workspace" | "find-in-folder" | "install-cli"
-            | "toggle-wrap" | "reveal-in-tree" | "close-all-tabs" | "close-other-tabs"
-            | "reopen-tab" | "save-all" | "next-tab" | "prev-tab") => {
+            | "toggle-wrap" | "go-to-tab" | "reveal-in-tree" | "close-all-tabs"
+            | "close-other-tabs" | "reopen-tab" | "save-all" | "next-tab" | "prev-tab") => {
                 let _ = app.emit("menu", id);
             }
             // The right-click menus in the UI: their own actions never fire.

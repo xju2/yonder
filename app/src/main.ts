@@ -441,7 +441,10 @@ void api.onMenu((id) => {
     if (path) void reveal(path);
   } else if (id === "close-all-tabs") void editors.closeAllTabs();
   else if (id === "close-other-tabs") void editors.closeOthers();
-  else if (id === "next-tab") editors.stepTab(1);
+  else if (id === "go-to-tab") {
+    const files = editors.openFiles().files;
+    if (conn && files.length) void picker.open("Go to open tab", files, (f) => void editors.open(f));
+  } else if (id === "next-tab") editors.stepTab(1);
   else if (id === "prev-tab") editors.stepTab(-1);
   else if (id === "save-all") void editors.saveAll();
   else if (id === "reopen-tab") editors.reopenClosed();
