@@ -1,5 +1,5 @@
 import { Menu } from "@tauri-apps/api/menu";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import * as api from "./api";
 import { baseName, Editors } from "./editor";
 import { Finder, Picker } from "./finder";
@@ -831,6 +831,23 @@ async function confirmQuit() {
 // Every quit (Cmd+Q, the Dock) is held until this answers: a stray Cmd+Q
 // would otherwise drop the connection and every terminal.
 void api.onQuitRequested(() => void confirmQuit());
+
+// The window opens at the size it was left at. shortcut: size only, not position
+// (a saved position can land off-screen when monitors change).
+const SIZE_KEY = "yonder.window";
+try {
+  const [w, h] = JSON.parse(localStorage.getItem(SIZE_KEY) ?? "null") ?? [];
+  if (w >= 640 && h >= 400) void getCurrentWindow().setSize(new LogicalSize(w, h));
+} catch {}
+let sizeTimer: number | undefined;
+window.addEventListener("resize", () => {
+  clearTimeout(sizeTimer);
+  sizeTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(SIZE_KEY, JSON.stringify([window.innerWidth, window.innerHeight]));
+    } catch {}
+  }, 500);
+});
 
 void getCurrentWindow().onCloseRequested(async (event) => {
   if (!editors.hasUnsaved()) return;
