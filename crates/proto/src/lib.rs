@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 pub const MAGIC: &[u8] = b"\0YONDER-AGENT-1\n";
 
 /// Bumped whenever a message changes shape. The app refuses agents that differ.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Upper bound for one frame, so a corrupt length cannot exhaust memory.
 pub const MAX_FRAME: usize = 256 << 20;
@@ -81,6 +81,11 @@ pub enum Op {
     /// with everything in it. There is no trash.
     Remove {
         path: String,
+    },
+    /// Copy a file, with its permissions. Fails if `to` exists or `from` is a folder.
+    Copy {
+        from: String,
+        to: String,
     },
     /// Start the login shell on a new pseudo-terminal. Output arrives as
     /// [`Event::PtyOutput`]; the end as [`Event::PtyExit`].

@@ -293,6 +293,23 @@ async function terminalHere(path: string) {
   void terminals.create(dir);
 }
 
+/** Copy a file under a name the user gives (default: "name copy.ext" beside it), then open the copy. */
+async function duplicate(path: string) {
+  const base = baseName(path);
+  const dot = base.lastIndexOf(".");
+  const suggested = dot > 0 ? `${base.slice(0, dot)} copy${base.slice(dot)}` : `${base} copy`;
+  const name = (await askText("Duplicate as", false, path))?.trim();
+  if (name === undefined || name === null) return;
+  const to = joinPath(path.replace(/\/[^/]*$/, "") || "/", name || suggested);
+  try {
+    await api.copyFile(path, to);
+    refreshTree();
+    await editors.open(to);
+  } catch (e) {
+    status(`Could not duplicate ${base}: ${api.asError(e).message}`);
+  }
+}
+
 /** Delete a file or folder for good (the remote has no trash), after asking. */
 async function deletePath(path: string) {
   const choice = await ask(`Delete ${baseName(path)}?`, [
@@ -343,6 +360,7 @@ const pathMenu = (path: string, reload: (() => void) | null = null) => {
     ["ctx-new-file", "New File…", conn ? () => void newFile(path) : null],
     ["ctx-terminal", "Open in Terminal", conn ? () => void terminalHere(path) : null],
     ["ctx-new-folder", "New Folder…", conn ? () => void newFolder(path) : null],
+    ["ctx-duplicate", "Duplicate…", conn && path !== conn.root ? () => void duplicate(path) : null],
     ["ctx-rename", "Rename…", conn && path !== conn.root ? () => void renamePath(path) : null],
     ["ctx-delete", "Delete…", conn && path !== conn.root ? () => void deletePath(path) : null],
     ["ctx-copy", "Copy Path", () => void copyPath(path, false)],

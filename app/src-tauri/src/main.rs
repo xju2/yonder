@@ -563,6 +563,19 @@ async fn remove(state: State<'_, AppState>, conn: u64, path: String) -> Result<(
     }
 }
 
+#[tauri::command]
+async fn copy_file(
+    state: State<'_, AppState>,
+    conn: u64,
+    from: String,
+    to: String,
+) -> Result<(), CmdError> {
+    match state.get(conn)?.call(Op::Copy { from, to }).await? {
+        Reply::Done => Ok(()),
+        other => Err(unexpected(other)),
+    }
+}
+
 #[derive(Serialize)]
 struct PtyOpened {
     pty: u64,
@@ -1284,6 +1297,7 @@ fn main() {
             rename,
             make_dir,
             remove,
+            copy_file,
             write_file,
             pty_open,
             pty_write,

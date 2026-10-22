@@ -27,6 +27,7 @@ pub fn handle(op: Op) -> Result<Reply, Error> {
         Op::Rename { from, to } => rename(Path::new(&from), Path::new(&to)),
         Op::MakeDir { path } => make_dir(Path::new(&path)),
         Op::Remove { path } => remove(Path::new(&path)),
+        Op::Copy { from, to } => copy(Path::new(&from), Path::new(&to)),
         Op::Git {
             cwd,
             args,
@@ -70,6 +71,25 @@ fn remove(path: &Path) -> Result<Reply, Error> {
     } else {
         fs::remove_file(path)?;
     }
+    Ok(Reply::Done)
+}
+
+fn copy(from: &Path, to: &Path) -> Result<Reply, Error> {
+    if from.is_dir() {
+        return Err(Error::new(
+            ErrorKind::IsDirectory,
+            "folders cannot be duplicated",
+        ));
+    }
+    let mut src = File::open(from)?;
+    // create_new: never replaces, and loses no race to a file made meanwhile.
+    let mut dst = OpenOptions::new().write(true).create_new(true).open(to)?;
+    let copied = io::copy(&mut src, &mut dst)
+        .and_then(|_| dst.set_permissions(src.metadata()?.permissions()));
+    if copied.is_err() {
+        let _ = fs::remove_file(to);
+    }
+    copied?;
     Ok(Reply::Done)
 }
 
@@ -567,6 +587,31 @@ mod tests {
         assert_eq!(handle(op("dir")).unwrap(), Reply::Done);
         assert!(!at("dir").exists());
         assert_eq!(handle(op("dir")).unwrap_err().kind, ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn copy_keeps_the_original_and_never_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        let at = |n: &str| d.path().join(n).to_string_lossy().into_owned();
+        let op = |from, to| Op::Copy { from, to };
+        fs::write(at("a"), "A").unwrap();
+        fs::write(at("b"), "B").unwrap();
+        assert_eq!(handle(op(at("a"), at("c"))).unwrap(), Reply::Done);
+        assert_eq!(fs::read_to_string(at("c")).unwrap(), "A");
+        assert_eq!(fs::read_to_string(at("a")).unwrap(), "A");
+        assert!(handle(op(at("a"), at("b"))).is_err());
+        assert_eq!(fs::read_to_string(at("b")).unwrap(), "B");
+        fs::create_dir(at("dir")).unwrap();
+        assert_eq!(
+            handle(op(at("dir"), at("e"))).unwrap_err().kind,
+            ErrorKind::IsDirectory
+        );
+        assert!(!d.path().join("e").exists());
+        assert_eq!(
+            handle(op(at("nope"), at("f"))).unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+        assert!(!d.path().join("f").exists());
     }
 
     #[test]

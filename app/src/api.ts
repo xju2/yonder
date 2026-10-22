@@ -89,6 +89,8 @@ export const makeDir = (path: string) => invoke<void>("make_dir", { conn, path }
 
 export const remove = (path: string) => invoke<void>("remove", { conn, path });
 
+export const copyFile = (from: string, to: string) => invoke<void>("copy_file", { conn, from, to });
+
 export const writeFile = (path: string, text: string, expectedHash: string | null) =>
   invoke<Written>("write_file", { conn, path, text, expectedHash });
 
