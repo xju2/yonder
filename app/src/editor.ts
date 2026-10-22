@@ -153,6 +153,15 @@ function storedWrap(): "on" | "off" {
   }
 }
 
+/** The status bar's cursor text: line and column, and how many characters are selected. */
+function cursorText(editor: monaco.editor.IStandaloneCodeEditor) {
+  const pos = editor.getPosition();
+  const model = editor.getModel();
+  if (!pos || !model) return "";
+  const chars = editor.getSelections()?.reduce((n, s) => n + model.getValueInRange(s).length, 0) ?? 0;
+  return `Ln ${pos.lineNumber}, Col ${pos.column}` + (chars ? ` (${chars} selected)` : "");
+}
+
 /** Word wrap for every editor, remembered across restarts. */
 function toggleWrap() {
   TEXT_OPTIONS.wordWrap = TEXT_OPTIONS.wordWrap === "on" ? "off" : "on";
@@ -223,9 +232,7 @@ export class Editors {
     void document.fonts.load('13px "IBM Plex Mono"').then(() => monaco.editor.remeasureFonts());
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save());
     trackFontZoom();
-    this.editor.onDidChangeCursorPosition((e) =>
-      this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`),
-    );
+    this.editor.onDidChangeCursorSelection(() => this.position(cursorText(this.editor)));
     this.show(null);
   }
 
@@ -842,8 +849,8 @@ export class Editors {
     const editor = monaco.editor.create(el, { ...TEXT_OPTIONS, model: tab.model });
     editor.restoreViewState(this.editor.saveViewState());
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void this.save(tab));
-    editor.onDidChangeCursorPosition((e) => {
-      if (editor.hasTextFocus()) this.position(`Ln ${e.position.lineNumber}, Col ${e.position.column}`);
+    editor.onDidChangeCursorSelection(() => {
+      if (editor.hasTextFocus()) this.position(cursorText(editor));
     });
     this.side = { editor, el, tab };
     editor.focus();
