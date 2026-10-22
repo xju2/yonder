@@ -144,7 +144,14 @@ export class TerminalPanel {
       return true;
     });
     // Let the show/hide shortcut through instead of sending it to the shell.
-    term.attachCustomKeyEventHandler((e) => !(e.ctrlKey && e.key === "`"));
+    term.attachCustomKeyEventHandler((e) => {
+      // Cmd+K clears the scrollback, as in Terminal.app; the shell's screen is untouched.
+      if (e.metaKey && e.key === "k") {
+        if (e.type === "keydown") term.clear();
+        return false;
+      }
+      return !(e.ctrlKey && e.key === "`");
+    });
 
     const view = document.createElement("div");
     view.className = "term-view";

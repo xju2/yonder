@@ -134,6 +134,7 @@ dialog. Cancel ends that login attempt.
   prints endlessly is paused rather than flooding the window, so
   <kbd>Ctrl</kbd>+<kbd>C</kbd> always answers at once. Terminals end with the
   connection; use `tmux` inside one if a session must survive.
+- **Clear terminal:** <kbd>Cmd</kbd>+<kbd>K</kbd> clears the scrollback.
 - **`yonder FILE`** in a Yonder terminal opens the file in this window. If
   your login files reset `PATH`, add `~/.cache/yonder/bin` back to it; inside
   `tmux`, it needs `set -g allow-passthrough on`.
