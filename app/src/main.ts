@@ -759,7 +759,21 @@ for (const [i, b] of sideTabs.entries()) {
   });
 }
 
-// ---- terminal panel height
+// ---- terminal panel height and sidebar width: remembered across restarts
+
+function remember(key: string, px: number) {
+  try {
+    localStorage.setItem(key, String(Math.round(px)));
+  } catch {}
+}
+function restore(key: string, cssVar: string, max: number) {
+  try {
+    const px = Number(localStorage.getItem(key));
+    if (px >= 80 && px <= max) document.documentElement.style.setProperty(cssVar, `${px}px`);
+  } catch {}
+}
+restore("yonder.sidebar", "--sidebar", window.innerWidth - 300);
+restore("yonder.panel-height", "--panel-height", window.innerHeight - 200);
 
 const panelSash = $("panel-sash");
 const panelBounds = () => {
@@ -771,6 +785,7 @@ const setPanelHeight = (h: number) => {
   const clamped = Math.round(Math.min(Math.max(h, min), max));
   document.documentElement.style.setProperty("--panel-height", `${clamped}px`);
   panelSash.setAttribute("aria-valuenow", String(clamped));
+  remember("yonder.panel-height", clamped);
 };
 panelSash.tabIndex = 0;
 panelSash.setAttribute("role", "separator");
@@ -801,6 +816,7 @@ sash.addEventListener("pointerdown", (e) => {
   const move = (ev: PointerEvent) => {
     const w = Math.min(Math.max(ev.clientX, 140), window.innerWidth - 300);
     document.documentElement.style.setProperty("--sidebar", `${w}px`);
+    remember("yonder.sidebar", w);
   };
   sash.addEventListener("pointermove", move);
   sash.addEventListener("pointerup", () => sash.removeEventListener("pointermove", move), {

@@ -40,7 +40,8 @@ dialog. Cancel ends that login attempt.
 - **Close other tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> keeps only the current tab.
 - **Go to open tab:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> searches the open files by name.
 - **Selection size:** the status bar shows how many characters are selected.
-- **Window size** is remembered across restarts.
+- **Window size**, the sidebar's width and the terminal panel's height are
+  remembered across restarts.
 - **Switch tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>→</kbd> (View menu).
 - **Go to File:** <kbd>Cmd</kbd>+<kbd>P</kbd>; add `:LINE` (as in `main.rs:120`) to open the file there.
 - **Save all:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> saves every tab with unsaved edits.
