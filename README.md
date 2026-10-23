@@ -134,6 +134,8 @@ dialog. Cancel ends that login attempt.
   prints endlessly is paused rather than flooding the window, so
   <kbd>Ctrl</kbd>+<kbd>C</kbd> always answers at once. Terminals end with the
   connection; use `tmux` inside one if a session must survive.
+- **Terminal text size:** <kbd>Cmd</kbd>+<kbd>=</kbd>, <kbd>Cmd</kbd>+<kbd>-</kbd> and <kbd>Cmd</kbd>+<kbd>0</kbd>
+  while a terminal has focus; remembered.
 - **Clear terminal:** <kbd>Cmd</kbd>+<kbd>K</kbd> clears the scrollback.
 - **`yonder FILE`** in a Yonder terminal opens the file in this window
   (`yonder FILE:120` at line 120). If

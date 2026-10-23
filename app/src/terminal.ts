@@ -46,6 +46,15 @@ interface Term {
   closed: boolean;
 }
 
+/** The text size of every terminal, changed with Cmd+= / Cmd+- / Cmd+0 and remembered. */
+let termFontSize = (() => {
+  try {
+    return Number(localStorage.getItem("yonder.term-font")) || 13;
+  } catch {
+    return 13;
+  }
+})();
+
 export class TerminalPanel {
   /** Every workspace's terminals. */
   private terms: Term[] = [];
@@ -128,7 +137,7 @@ export class TerminalPanel {
     this.sash.hidden = false;
     const term = new Terminal({
       fontFamily: '"IBM Plex Mono", "SF Mono", Menlo, Monaco, "DejaVu Sans Mono", monospace',
-      fontSize: 13,
+      fontSize: termFontSize,
       cursorBlink: true,
       scrollback: 10_000,
       // Option works as Meta, as most shells and editors expect.
@@ -148,6 +157,12 @@ export class TerminalPanel {
       // Cmd+K clears the scrollback, as in Terminal.app; the shell's screen is untouched.
       if (e.metaKey && e.key === "k") {
         if (e.type === "keydown") term.clear();
+        return false;
+      }
+      // Cmd+= / Cmd+- / Cmd+0: text size, for every terminal.
+      const step = e.metaKey && !e.altKey ? { "=": 1, "+": 1, "-": -1, "0": 0 }[e.key] : undefined;
+      if (step !== undefined) {
+        if (e.type === "keydown") this.zoom(step);
         return false;
       }
       return !(e.ctrlKey && e.key === "`");
@@ -326,6 +341,15 @@ export class TerminalPanel {
   private markDead(t: Term) {
     t.alive = false;
     t.tab.classList.add("dead");
+  }
+
+  private zoom(step: number) {
+    termFontSize = step === 0 ? 13 : Math.min(Math.max(termFontSize + step, 8), 40);
+    for (const t of this.terms) t.term.options.fontSize = termFontSize;
+    try {
+      localStorage.setItem("yonder.term-font", String(termFontSize));
+    } catch {}
+    this.fitActive();
   }
 
   private fitActive() {
