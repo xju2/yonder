@@ -479,7 +479,7 @@ const terminals = new TerminalPanel(
   $("term-body"),
   () => conn?.root ?? null,
   () => conn?.generation ?? null,
-  (path) => void editors.open(path),
+  (path) => conn && void showFile(conn.host, path),
 );
 
 $("toggle-terminal").addEventListener("click", () => terminals.toggle());
@@ -893,8 +893,9 @@ async function openHanded() {
 
 /** Open a file on `host`, switching to a workspace there if this one is elsewhere. */
 async function showFile(host: string, path: string) {
-  if (conn?.host !== host && !(await openWorkspace(host, path.replace(/\/[^/]*$/, "") || "/"))) return;
-  await editors.open(path);
+  if (conn?.host !== host && !(await openWorkspace(host, path.replace(/:\d+$/, "").replace(/\/[^/]*$/, "") || "/"))) return;
+  const line = Number(/:(\d+)$/.exec(path)?.[1]);
+  await editors.open(path.replace(/:\d+$/, ""), line ? { line, column: 1, length: 0 } : undefined);
 }
 // `yonder FILE` in an OS terminal, here or over ssh.
 void api.onOpenFile((e) => {

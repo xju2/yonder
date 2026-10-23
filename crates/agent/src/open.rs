@@ -97,7 +97,14 @@ pub fn run(args: &[String]) -> i32 {
     code
 }
 
+/// `FILE:LINE` opens at that line. The line travels as a `:LINE` suffix on the
+/// path. shortcut: a real file named `x:12` is opened whole here, but the app
+/// then reads its name as a line; rename such files.
 fn checked(arg: &str) -> Result<String, String> {
+    let (arg, line) = match arg.rsplit_once(':') {
+        Some((file, n)) if n.parse::<u32>().is_ok() && !Path::new(arg).exists() => (file, Some(n)),
+        _ => (arg, None),
+    };
     let path = normalize(&std::path::absolute(arg).map_err(|e| e.to_string())?);
     let meta = path.metadata().map_err(|e| e.to_string())?;
     if meta.is_dir() {
@@ -107,7 +114,10 @@ fn checked(arg: &str) -> Result<String, String> {
     if path.chars().any(char::is_control) {
         return Err("contains control characters".into());
     }
-    Ok(path.to_string())
+    Ok(match line {
+        Some(n) => format!("{path}:{n}"),
+        None => path.to_string(),
+    })
 }
 
 /// `ESC ] 7777 ; open ; PATH BEL`. Inside tmux it is wrapped for passthrough,
@@ -149,5 +159,8 @@ mod tests {
         assert_eq!(normalize(Path::new("/../a")), PathBuf::from("/a"));
         assert!(checked("/").unwrap_err().contains("folder"));
         assert!(checked("/no/such/file").is_err());
+        assert_eq!(checked("/etc/passwd:7").unwrap(), "/etc/passwd:7");
+        assert_eq!(checked("/etc/passwd").unwrap(), "/etc/passwd");
+        assert!(checked("/no/such/file:7").is_err());
     }
 }
