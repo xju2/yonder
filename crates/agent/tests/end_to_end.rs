@@ -581,7 +581,11 @@ async fn process_and_tcp_streams() {
         })
         .unwrap();
     }
-    let out = stream_until(&mut events, 7, "got b").await;
+    let mut out = stream_until(&mut events, 7, "got b").await;
+    // stderr and stdout are separate pipes: the "in" line may arrive after "got b".
+    if !out.contains(&format!("in {cwd}")) {
+        out += &stream_until(&mut events, 7, &format!("in {cwd}")).await;
+    }
     assert!(out.contains(&format!("in {cwd}")), "{out:?}");
     assert!(out.contains("got a\ngot b"), "{out:?}");
 
