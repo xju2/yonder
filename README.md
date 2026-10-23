@@ -72,7 +72,8 @@ dialog. Cancel ends that login attempt.
 - **Code intelligence:** in Python and C/C++ files, <kbd>F12</kbd> or
   <kbd>Cmd</kbd>+click goes to a definition (opening its file), hovering shows
   types and docs, problems are underlined, and <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>
-  lists the file's symbols. Yonder uses the language server already on the
+  lists the file's symbols; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> shows the
+  signature of the call being typed. Yonder uses the language server already on the
   remote: basedpyright, pyright or pylsp from the folder's `.venv`, `venv` or
   `env` first, then `PATH`; clangd from `PATH` (it reads
   `compile_commands.json`). With none, the status bar says what to install.

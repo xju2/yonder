@@ -100,6 +100,12 @@ class Server {
           definition: { linkSupport: false },
           hover: { contentFormat: ["markdown", "plaintext"] },
           documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+          signatureHelp: {
+            signatureInformation: {
+              documentationFormat: ["markdown", "plaintext"],
+              parameterInformation: { labelOffsetSupport: false },
+            },
+          },
           publishDiagnostics: {},
         },
         workspace: { configuration: true, workspaceFolders: true },
@@ -245,6 +251,31 @@ export class Languages {
               : { value: "```" + (c.language ?? "") + "\n" + c.value + "\n```" },
         );
         return { contents, range: r.range ? toRange(r.range) : undefined };
+      },
+    });
+    // Ctrl+Shift+Space: the signature of the call being typed (never pops up by itself).
+    monaco.languages.registerSignatureHelpProvider(langs, {
+      signatureHelpTriggerCharacters: ["(", ","],
+      provideSignatureHelp: async (model, pos) => {
+        const r = await this.ask<any>(model, "textDocument/signatureHelp", {
+          textDocument: { uri: fileUri(model.uri.path) },
+          position: toPos(pos),
+        });
+        if (!r?.signatures?.length) return null;
+        const text = (d: any) => (typeof d === "string" ? d : d?.value);
+        const value = {
+          signatures: r.signatures.map((sig: any) => ({
+            label: sig.label,
+            documentation: text(sig.documentation) ? { value: text(sig.documentation) } : undefined,
+            parameters: (sig.parameters ?? []).map((p: any) => ({
+              label: p.label,
+              documentation: text(p.documentation) ? { value: text(p.documentation) } : undefined,
+            })),
+          })),
+          activeSignature: r.activeSignature ?? 0,
+          activeParameter: r.activeParameter ?? 0,
+        };
+        return { value, dispose() {} };
       },
     });
     monaco.languages.registerDocumentSymbolProvider(langs, {
