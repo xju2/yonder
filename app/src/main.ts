@@ -464,6 +464,7 @@ void api.onMenu((id) => {
     if (conn && files.length) void picker.open("Go to open tab", files, (f) => void editors.open(f));
   } else if (id === "next-tab") editors.stepTab(1);
   else if (id === "prev-tab") editors.stepTab(-1);
+  else if (id === "auto-save") toggleAutoSave();
   else if (id === "save-all") void editors.saveAll();
   else if (id === "reopen-tab") editors.reopenClosed();
   else if (id === "toggle-wrap") editors.toggleWrap();
@@ -759,6 +760,23 @@ for (const [i, b] of sideTabs.entries()) {
     void showSideView(next.dataset.view as SideView);
   });
 }
+
+// ---- auto save
+
+const AUTOSAVE_KEY = "yonder.autosave";
+let autoSave = false;
+try {
+  autoSave = localStorage.getItem(AUTOSAVE_KEY) === "on";
+} catch {}
+function toggleAutoSave() {
+  autoSave = !autoSave;
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, autoSave ? "on" : "off");
+  } catch {}
+  status(autoSave ? "Auto Save on: edits are saved when the window loses focus." : "Auto Save off.");
+}
+// Not on tab switches: a half-typed file stays unsaved until you leave the window.
+window.addEventListener("blur", () => autoSave && void editors.saveAll());
 
 // ---- terminal panel height and sidebar width: remembered across restarts
 

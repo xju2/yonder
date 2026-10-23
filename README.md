@@ -44,6 +44,8 @@ dialog. Cancel ends that login attempt.
   remembered across restarts.
 - **Switch tabs:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>→</kbd> (View menu).
 - **Go to File:** <kbd>Cmd</kbd>+<kbd>P</kbd>; add `:LINE` (as in `main.rs:120`) to open the file there.
+- **Auto save:** File > Toggle Auto Save on Focus Loss saves every edited file when you
+  leave the window; a changed-on-remote file still asks first.
 - **Save all:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> saves every tab with unsaved edits.
 - **Files changed elsewhere:** when you come back to the window or switch
   tabs, an open file that a job or `git pull` rewrote is reloaded. If it has
