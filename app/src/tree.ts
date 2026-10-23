@@ -259,6 +259,21 @@ export class FileTree {
     ev.preventDefault();
   }
 
+  /** Fold every folder below the root, so the next unfold shows them closed too. */
+  collapseAll() {
+    const fold = (n: Node) => {
+      for (const c of n.children ?? []) {
+        if (c.kind !== "dir") continue;
+        fold(c);
+        if (!c.expanded) continue;
+        c.expanded = false;
+        this.paintTwisty(c);
+        c.li.querySelector(":scope > ul")?.remove();
+      }
+    };
+    if (this.root) fold(this.root);
+  }
+
   private async activate(n: Node) {
     if (n.kind === "dir") {
       n.expanded = !n.expanded;

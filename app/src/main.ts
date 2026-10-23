@@ -707,6 +707,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 $("refresh-tree").addEventListener("click", refreshTree);
+$("collapse-tree").addEventListener("click", () => tree.collapseAll());
 
 // Refreshing on focus catches files written by batch jobs or other machines,
 // which file-change notifications miss on network filesystems.

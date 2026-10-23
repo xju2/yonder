@@ -118,6 +118,7 @@ dialog. Cancel ends that login attempt.
 - **Reveal in File Tree:** <kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> (View menu), the same as
   double-clicking a tab.
 - **Double-click a tab** to show its file in the tree.
+- **Collapse all:** the ⊟ button above the tree folds every folder.
 - **New files from elsewhere:** the tree re-lists its open folders when the
   window regains focus, or when you press ↻. This works on Lustre and NFS,
   where file-change notifications miss writes from other machines.
