@@ -176,7 +176,7 @@ export const streamClose = (conn: number, id: number) => invoke<void>("stream_cl
 /** A port on this Mac leading to `port` on the remote's loopback. */
 export const tunnelOpen = (conn: number, port: number) => invoke<number>("tunnel_open", { conn, port });
 
-// ---- git (read-only)
+// ---- git
 
 export interface GitChange {
   /** Relative to the repository root. */
@@ -184,6 +184,9 @@ export interface GitChange {
   old_path: string | null;
   /** M, A, D, R, C, U (conflict) or ? (untracked). */
   status: string;
+  /** The index differs from HEAD / the working tree differs from the index. */
+  staged?: boolean;
+  unstaged?: boolean;
 }
 export interface GitStatus {
   branch: string | null;
@@ -212,6 +215,8 @@ export interface GitDiff {
 /** `repo` is null when `dir` is not inside a git repository. */
 export const gitStatus = (dir: string) =>
   invoke<{ repo: string | null; status: GitStatus | null }>("git_status", { conn, dir });
+/** Run a git command that changes the repository; rejects with git's message. */
+export const gitRun = (repo: string, args: string[]) => invoke<string>("git_run", { conn, repo, args });
 export const gitLog = (repo: string, skip: number, limit: number) =>
   invoke<GitCommit[]>("git_log", { conn, repo, skip, limit });
 export const gitCommitFiles = (repo: string, hash: string) =>

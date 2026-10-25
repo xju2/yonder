@@ -1,7 +1,8 @@
-// The sidebar's Changes and History views. Read-only: they show what git
-// knows and open diffs; committing stays in the terminal.
+// The sidebar's Changes and History views: what git knows, diffs, and the
+// everyday actions on Changes (stage, unstage, revert, commit, push).
 
 import * as api from "./api";
+import { ask, tell } from "./modal";
 
 export interface DiffRequest {
   repo: string;
@@ -54,8 +55,12 @@ export function relativeTime(seconds: number, now = Date.now() / 1000): string {
 }
 
 /** A row for one changed file: status letter, name, and folder. */
-function changeRow(c: api.GitChange, onOpen: () => void): HTMLElement {
-  const row = el("div", "git-file");
+function changeRow(
+  c: api.GitChange,
+  onOpen: () => void,
+  actions?: [label: string, title: string, run: () => void][],
+): HTMLElement {
+  const row = el("div", c.staged ? "git-file staged" : "git-file");
   row.tabIndex = 0;
   row.setAttribute("role", "button");
   const name = c.path.split("/").pop()!;
@@ -64,6 +69,20 @@ function changeRow(c: api.GitChange, onOpen: () => void): HTMLElement {
   letter.title = STATUS_NAMES[c.status] ?? c.status;
   row.title = c.old_path ? `${c.old_path} → ${c.path}` : c.path;
   row.append(letter, el("span", "git-name", name), el("span", "git-dir", dir));
+  if (actions) {
+    const box = el("span", "git-actions");
+    for (const [label, title, run] of actions) {
+      const b = el("button", undefined, label);
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        run();
+      });
+      box.append(b);
+    }
+    row.append(box);
+  }
   row.addEventListener("click", onOpen);
   row.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -79,6 +98,8 @@ export class GitPanel {
   private loadedSkip = 0;
   private historyDone = false;
   private changesBusy: Promise<void> | null = null;
+  /** The commit message being typed; survives refreshes. */
+  private message = "";
   /** Bumped by reset(); results from older requests are dropped. */
   private session = 0;
   /** Bumped by each history reload; older pages are dropped. */
@@ -100,6 +121,7 @@ export class GitPanel {
     this.historyRun++;
     this.changesBusy = null;
     this.repo = null;
+    this.message = "";
     this.loadedSkip = 0;
     this.historyDone = false;
     this.changesEl.replaceChildren();
@@ -163,18 +185,101 @@ export class GitPanel {
     if (status?.upstream) h.title = `Tracking ${status.upstream}`;
     if (!repo || !status) {
       body.append(el("p", "git-note", "This folder is not in a git repository."));
-    } else if (status.files.length === 0) {
-      body.append(el("p", "git-note", "No changes since the last commit."));
     } else {
+      this.changesEl.append(this.commitBox(repo, status));
+      if (status.files.length === 0) {
+        body.append(el("p", "git-note", "No changes since the last commit."));
+      }
       for (const c of status.files) {
+        const actions: [string, string, () => void][] = [];
+        if (c.unstaged) actions.push(["+", "Stage", () => this.stage(repo, c)]);
+        if (c.staged) actions.push(["−", "Unstage", () => this.unstage(repo, c)]);
+        actions.push(["↩", "Revert", () => void this.revert(repo, c)]);
         body.append(
-          changeRow(c, () =>
-            this.openDiff({ repo, path: c.path, oldPath: c.old_path, rev: null, short: null }),
+          changeRow(
+            c,
+            () => this.openDiff({ repo, path: c.path, oldPath: c.old_path, rev: null, short: null }),
+            actions,
           ),
         );
       }
     }
     this.changesEl.append(body);
+  }
+
+  /** Run git commands one after another, then refresh; failures are shown. */
+  private async act(repo: string, ...commands: string[][]) {
+    try {
+      for (const args of commands) await api.gitRun(repo, args);
+    } catch (e) {
+      await tell("git failed", api.asError(e).message);
+    }
+    await this.refreshChanges();
+  }
+
+  private stage(repo: string, c: api.GitChange) {
+    void this.act(repo, ["add", "-A", "--", ...(c.old_path ? [c.old_path] : []), c.path]);
+  }
+
+  // `reset` rather than `restore --staged`: it also works before the first commit.
+  private unstage(repo: string, c: api.GitChange) {
+    void this.act(repo, ["reset", "-q", "--", ...(c.old_path ? [c.old_path] : []), c.path]);
+  }
+
+  /** Throw away every change to the file, back to HEAD. */
+  private async revert(repo: string, c: api.GitChange) {
+    const answer = await ask(
+      `Revert ${c.path}?`,
+      [
+        { value: "cancel", label: "Cancel" },
+        { value: "revert", label: c.status === "?" ? "Delete file" : "Revert", danger: true },
+      ],
+      "This discards its changes and cannot be undone.",
+    );
+    if (answer !== "revert") return;
+    if (c.status === "?") return this.act(repo, ["clean", "-fq", "--", c.path]);
+    const inHead = await api.gitRun(repo, ["cat-file", "-e", `HEAD:${c.path}`]).then(
+      () => true,
+      () => false,
+    );
+    const back = inHead ? [["checkout", "HEAD", "--", c.path]] : [["rm", "-fq", "--", c.path]];
+    if (c.old_path) back.push(["checkout", "HEAD", "--", c.old_path]);
+    await this.act(repo, ...back);
+  }
+
+  private commitBox(repo: string, status: api.GitStatus): HTMLElement {
+    const box = el("div", "git-commit-box");
+    const input = el("textarea");
+    input.rows = 2;
+    input.placeholder = "Commit message";
+    input.value = this.message;
+    input.addEventListener("input", () => (this.message = input.value));
+    const commit = el("button", "primary", "Commit");
+    commit.title = "Commit the staged changes";
+    commit.addEventListener("click", async () => {
+      const message = this.message.trim();
+      if (!status.files.some((f) => f.staged)) return void tell("Nothing is staged.", "Stage files with + first.");
+      if (!message) return void tell("Write a commit message first.");
+      commit.disabled = true;
+      try {
+        await api.gitRun(repo, ["commit", "-m", message]);
+        this.message = "";
+      } catch (e) {
+        await tell("git failed", api.asError(e).message);
+      }
+      await this.refreshChanges();
+    });
+    const push = el("button", undefined, "Push");
+    push.title = status.upstream ? `Push to ${status.upstream}` : "Push and track origin";
+    push.addEventListener("click", async () => {
+      push.disabled = true;
+      // The first push of a branch has no upstream yet.
+      await this.act(repo, status.upstream ? ["push"] : ["push", "-u", "origin", "HEAD"]);
+    });
+    const row = el("div", "git-commit-actions");
+    row.append(commit, push);
+    box.append(input, row);
+    return box;
   }
 
   /** Show the history, loading the first page if nothing is loaded yet. */

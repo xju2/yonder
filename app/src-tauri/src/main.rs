@@ -797,7 +797,7 @@ async fn tunnel(
     let _ = down.await;
 }
 
-// ---- git (read-only)
+// ---- git
 
 #[derive(Serialize)]
 struct GitStatusOut {
@@ -824,6 +824,19 @@ async fn git_status(
         repo: Some(repo),
         status: Some(status),
     })
+}
+
+/// Run a git command that changes the repository: stage, commit, push...
+#[tauri::command]
+async fn git_run(
+    state: State<'_, AppState>,
+    conn: u64,
+    repo: String,
+    args: Vec<String>,
+) -> Result<String, CmdError> {
+    let conn = state.get(conn)?;
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    Ok(git::run(&conn, &repo, &args).await?)
 }
 
 #[tauri::command]
@@ -1306,6 +1319,7 @@ fn main() {
             pty_resize,
             pty_close,
             git_status,
+            git_run,
             git_log,
             git_commit_files,
             git_diff,
