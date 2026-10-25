@@ -1,7 +1,7 @@
-//! Git, read-only: what changed, the history, and file contents for diffs.
+//! Git: what changed, the history, and file contents for diffs.
 //!
 //! Every function runs `git` on the remote through the agent and parses its
-//! machine-readable output. Nothing here writes to the repository.
+//! machine-readable output. Only [`run`] writes to the repository.
 
 use crate::Connection;
 use serde::{Deserialize, Serialize};
@@ -71,6 +71,13 @@ async fn git_ok(conn: &Connection, cwd: &str, args: &[&str]) -> Result<Vec<u8>, 
     Ok(out.stdout)
 }
 
+/// Run a git command that changes the repository (stage, commit, push...)
+/// and return its output. Failure carries git's own message.
+pub async fn run(conn: &Connection, repo: &str, args: &[&str]) -> Result<String, Error> {
+    let out = git_ok(conn, repo, args).await?;
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
 /// The top of the repository containing `dir`, or `None` if it is not in one.
 pub async fn repo_root(conn: &Connection, dir: &str) -> Result<Option<String>, Error> {
     let out = git(conn, dir, &["rev-parse", "--show-toplevel"], MAX_LISTING).await?;
@@ -106,6 +113,10 @@ pub struct Change {
     pub old_path: Option<String>,
     /// One letter, as git shows it: M, A, D, R, C, U (conflict) or ? (untracked).
     pub status: char,
+    /// The index differs from HEAD for this path.
+    pub staged: bool,
+    /// The working tree differs from the index (or the file is untracked).
+    pub unstaged: bool,
 }
 
 /// Uncommitted changes: staged and unstaged together, compared with HEAD.
@@ -164,6 +175,8 @@ pub fn parse_status(out: &[u8]) -> Status {
                     status: status_letter(&entry[2..4]),
                     path: path.to_string(),
                     old_path: None,
+                    staged: &entry[2..3] != ".",
+                    unstaged: &entry[3..4] != ".",
                 }),
             // 2 XY sub mH mI mW hH hI Xscore path NUL origPath
             '2' => {
@@ -173,6 +186,8 @@ pub fn parse_status(out: &[u8]) -> Status {
                     status: status_letter(&entry[2..4]),
                     path,
                     old_path: old,
+                    staged: &entry[2..3] != ".",
+                    unstaged: &entry[3..4] != ".",
                 })
             }
             // u XY sub m1 m2 m3 mW h1 h2 h3 path
@@ -180,6 +195,8 @@ pub fn parse_status(out: &[u8]) -> Status {
                 status: 'U',
                 path: path.to_string(),
                 old_path: None,
+                staged: false,
+                unstaged: true,
             }),
             '!' => {
                 st.ignored.push(entry[2..].to_string());
@@ -189,6 +206,8 @@ pub fn parse_status(out: &[u8]) -> Status {
                 status: '?',
                 path: entry[2..].to_string(),
                 old_path: None,
+                staged: false,
+                unstaged: true,
             }),
             _ => None,
         };
@@ -450,12 +469,16 @@ pub fn parse_name_status(out: &[u8]) -> Vec<Change> {
                 status,
                 path: second,
                 old_path: Some(first),
+                staged: false,
+                unstaged: false,
             });
         } else {
             changes.push(Change {
                 status,
                 path: first,
                 old_path: None,
+                staged: false,
+                unstaged: false,
             });
         }
     }
@@ -521,6 +544,18 @@ u UU N... 100644 100644 100644 100644 e1 e2 e3 both.txt\0\
             ]
         );
         assert_eq!(st.ignored, vec!["target/"]);
+        let flags: Vec<_> = st.files.iter().map(|c| (c.staged, c.unstaged)).collect();
+        assert_eq!(
+            flags,
+            vec![
+                (false, true),
+                (true, false),
+                (true, false),
+                (true, false),
+                (false, true),
+                (false, true)
+            ]
+        );
     }
 
     #[test]

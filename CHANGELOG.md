@@ -1,7 +1,13 @@
-# Changes since 0.4.0
+# 0.5.0
 
-Added in the autonomous feature cycles of 2026-10-18 to 2026-10-23. Each
+Added in the autonomous feature cycles of 2026-10-18 to 2026-10-25. Each
 feature is also described in the README.
+
+## Git
+- The **Changes** tab can **stage** (+), **unstage** (−) and **revert** (↩,
+  asks first) a file, **commit** the staged files with a message, and
+  **push** (setting the upstream to `origin` the first time). Staged files
+  are shown in bold.
 
 ## Files and the tree
 - Right-click **New File…**, **New Folder…**, **Duplicate…**, **Rename…**,
